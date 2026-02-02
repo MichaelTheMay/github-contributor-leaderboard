@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -7,7 +8,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
-from src.db.database import async_session_maker
+from src.db.database import create_worker_session_maker
 from src.db.models.contribution import ContributionEvent, EventType
 from src.db.models.job import JobStatus, JobType, ScrapeJob
 from src.db.models.leaderboard import GlobalLeaderboard, RepositoryLeaderboard
@@ -19,6 +20,10 @@ from src.workers.celery_app import celery_app
 
 logger = structlog.get_logger()
 
+# Windows requires ProactorEventLoop for asyncpg
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 
 def run_async(coro):
     """Run async code in sync context."""
@@ -27,6 +32,14 @@ def run_async(coro):
     try:
         return loop.run_until_complete(coro)
     finally:
+        # Properly cleanup pending tasks
+        try:
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        except Exception:
+            pass
         loop.close()
 
 
@@ -42,7 +55,7 @@ async def _scrape_repository_async(task, repository_id: int, job_id: int) -> dic
     """Async implementation of repository scraping."""
     logger.info("Starting repository scrape", repository_id=repository_id, job_id=job_id)
 
-    async with async_session_maker() as db:
+    async with create_worker_session_maker()() as db:
         # Get repository and job
         repo_result = await db.execute(
             select(Repository).where(Repository.id == repository_id)
@@ -275,7 +288,7 @@ async def _refresh_stale_repositories_async() -> dict:
     """Async implementation of stale repository refresh."""
     logger.info("Checking for stale repositories")
 
-    async with async_session_maker() as db:
+    async with create_worker_session_maker()() as db:
         cutoff = datetime.utcnow() - timedelta(hours=24)
 
         result = await db.execute(
@@ -316,7 +329,7 @@ async def _recalculate_global_leaderboard_async() -> dict:
     """Async implementation of global leaderboard recalculation."""
     logger.info("Recalculating global leaderboard")
 
-    async with async_session_maker() as db:
+    async with create_worker_session_maker()() as db:
         # Aggregate scores per user across all repositories
         result = await db.execute(
             select(
@@ -374,7 +387,7 @@ def trigger_repository_scrape(self, owner: str, name: str) -> dict:
 
 async def _trigger_repository_scrape_async(task, owner: str, name: str) -> dict:
     """Async implementation of triggering a repository scrape."""
-    async with async_session_maker() as db:
+    async with create_worker_session_maker()() as db:
         result = await db.execute(
             select(Repository).where(
                 Repository.owner == owner,
