@@ -66,7 +66,7 @@ def get_template_path() -> Path:
 async def dashboard_page() -> HTMLResponse:
     """Serve the monitoring dashboard."""
     template_path = get_template_path() / "dashboard.html"
-    return HTMLResponse(content=template_path.read_text())
+    return HTMLResponse(content=template_path.read_text(encoding="utf-8"))
 
 
 @router.websocket("/ws/logs")
