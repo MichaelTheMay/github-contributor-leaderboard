@@ -312,7 +312,7 @@
 
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${protocol}//${window.location.host}/ws/logs`);
+            ws = new WebSocket(`${protocol}//${window.location.host}/dashboard/ws/logs`);
 
             ws.onopen = () => {
                 document.getElementById('connectionStatus').className = 'status-dot';
@@ -420,6 +420,16 @@
             }
         }
 
+        async function refreshStats() {
+            try {
+                const response = await fetch('/dashboard/stats');
+                const data = await response.json();
+                updateStats(data);
+            } catch (err) {
+                console.error('Failed to fetch stats:', err);
+            }
+        }
+
         function renderRepos(repos) {
             const container = document.getElementById('repoList');
             if (repos.length === 0) {
@@ -440,11 +450,13 @@
 
         // Initialize
         connect();
+        refreshStats();
         refreshJobs();
         refreshRepos();
 
         // Auto-refresh every 10 seconds
         setInterval(() => {
+            refreshStats();
             refreshJobs();
             refreshRepos();
         }, 10000);
