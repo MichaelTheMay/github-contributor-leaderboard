@@ -41,13 +41,8 @@ def create_app() -> FastAPI:
     # Include API routes
     app.include_router(api_router, prefix="/api/v1")
 
-    # Include dashboard routes (with WebSocket support)
-    app.include_router(dashboard_router, tags=["dashboard"])
-
-    @app.get("/", include_in_schema=False)
-    async def root_redirect() -> RedirectResponse:
-        """Redirect root to dashboard."""
-        return RedirectResponse(url="/dashboard")
+    # Include dashboard routes at /dashboard (with WebSocket support)
+    app.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
 
     @app.get("/health")
     async def health_check() -> dict[str, str]:
