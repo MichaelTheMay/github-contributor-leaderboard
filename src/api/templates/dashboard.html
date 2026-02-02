@@ -202,6 +202,75 @@
             font-size: 12px;
             color: #8b949e;
         }
+        .leaderboard-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .leaderboard-table th, .leaderboard-table td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid #30363d;
+        }
+        .leaderboard-table th {
+            font-size: 12px;
+            font-weight: 600;
+            color: #8b949e;
+            text-transform: uppercase;
+            background: #161b22;
+            position: sticky;
+            top: 0;
+        }
+        .leaderboard-table tr:hover {
+            background: #1c2128;
+        }
+        .rank-cell {
+            font-weight: 600;
+            color: #f0f6fc;
+            width: 50px;
+        }
+        .rank-1 { color: #ffd700; }
+        .rank-2 { color: #c0c0c0; }
+        .rank-3 { color: #cd7f32; }
+        .user-cell {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #30363d;
+        }
+        .user-link {
+            color: #58a6ff;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .user-link:hover {
+            text-decoration: underline;
+        }
+        .score-cell {
+            font-weight: 600;
+            color: #3fb950;
+        }
+        .stat-cell {
+            color: #8b949e;
+            font-size: 13px;
+        }
+        .repo-selector {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            min-width: 200px;
+        }
+        .leaderboard-scroll {
+            max-height: 500px;
+            overflow-y: auto;
+        }
     </style>
 </head>
 <body>
@@ -273,6 +342,37 @@
                 <div id="repoList" style="max-height: 300px; overflow-y: auto;">
                     <div style="text-align: center; color: #8b949e; padding: 20px;">Loading...</div>
                 </div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+                <span class="card-title">🏆 Contributor Leaderboard</span>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <select id="repoSelector" class="repo-selector" onchange="loadLeaderboard()">
+                        <option value="">Select repository...</option>
+                    </select>
+                    <button class="btn" onclick="loadLeaderboard()">Refresh</button>
+                </div>
+            </div>
+            <div class="leaderboard-scroll">
+                <table class="leaderboard-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Contributor</th>
+                            <th>Score</th>
+                            <th>Commits</th>
+                            <th>PRs Merged</th>
+                            <th>Reviews</th>
+                            <th>Issues</th>
+                            <th>Comments</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaderboardTable">
+                        <tr><td colspan="8" style="text-align: center; color: #8b949e; padding: 40px;">Select a repository to view leaderboard</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
@@ -432,8 +532,11 @@
 
         function renderRepos(repos) {
             const container = document.getElementById('repoList');
+            const selector = document.getElementById('repoSelector');
+
             if (repos.length === 0) {
                 container.innerHTML = '<div style="text-align: center; color: #8b949e; padding: 20px;">No repositories tracked</div>';
+                selector.innerHTML = '<option value="">No repositories available</option>';
                 return;
             }
 
@@ -446,6 +549,79 @@
                     <div class="repo-stars">${formatNumber(repo.stars)} stars</div>
                 </div>
             `).join('');
+
+            // Populate repo selector for leaderboard
+            const currentValue = selector.value;
+            selector.innerHTML = '<option value="">Select repository...</option>' +
+                repos.filter(r => r.status === 'completed').map(repo =>
+                    `<option value="${repo.owner}/${repo.name}">${repo.full_name} (${formatNumber(repo.stars)} ⭐)</option>`
+                ).join('');
+
+            // Restore selection or auto-select first completed repo
+            if (currentValue && selector.querySelector(`option[value="${currentValue}"]`)) {
+                selector.value = currentValue;
+            } else if (repos.some(r => r.status === 'completed') && !selector.value) {
+                const firstCompleted = repos.find(r => r.status === 'completed');
+                if (firstCompleted) {
+                    selector.value = `${firstCompleted.owner}/${firstCompleted.name}`;
+                    loadLeaderboard();
+                }
+            }
+        }
+
+        async function loadLeaderboard() {
+            const selector = document.getElementById('repoSelector');
+            const tbody = document.getElementById('leaderboardTable');
+            const repoPath = selector.value;
+
+            if (!repoPath) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #8b949e; padding: 40px;">Select a repository to view leaderboard</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #8b949e; padding: 40px;">Loading...</td></tr>';
+
+            try {
+                const response = await fetch(`/api/v1/leaderboard/${repoPath}?page_size=50`);
+                const data = await response.json();
+                renderLeaderboard(data.entries || []);
+            } catch (err) {
+                console.error('Failed to fetch leaderboard:', err);
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #f85149; padding: 40px;">Failed to load leaderboard</td></tr>';
+            }
+        }
+
+        function renderLeaderboard(entries) {
+            const tbody = document.getElementById('leaderboardTable');
+
+            if (entries.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #8b949e; padding: 40px;">No contributors found</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = entries.map(entry => {
+                const rankClass = entry.rank <= 3 ? `rank-${entry.rank}` : '';
+                const medal = entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : '';
+
+                return `
+                    <tr>
+                        <td class="rank-cell ${rankClass}">${medal} #${entry.rank}</td>
+                        <td>
+                            <div class="user-cell">
+                                <a href="${entry.user.profile_url}" target="_blank" rel="noopener noreferrer" class="user-link">
+                                    @${entry.user.username}
+                                </a>
+                            </div>
+                        </td>
+                        <td class="score-cell">${parseFloat(entry.total_score).toLocaleString()}</td>
+                        <td class="stat-cell">${entry.commit_count}</td>
+                        <td class="stat-cell">${entry.pr_merged_count}</td>
+                        <td class="stat-cell">${entry.pr_reviewed_count}</td>
+                        <td class="stat-cell">${entry.issues_opened_count}</td>
+                        <td class="stat-cell">${entry.comments_count}</td>
+                    </tr>
+                `;
+            }).join('');
         }
 
         // Initialize
