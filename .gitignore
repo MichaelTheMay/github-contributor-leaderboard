@@ -73,3 +73,4 @@ Thumbs.db
 # Alembic
 migrations/versions/*.py
 !migrations/versions/.gitkeep
+secrets/
