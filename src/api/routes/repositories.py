@@ -1,0 +1,107 @@
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.api.schemas.repository import RepositoryCreate, RepositoryDetail, RepositoryList
+from src.db import get_db
+from src.services.repository_service import RepositoryService
+
+router = APIRouter()
+
+
+@router.post(
+    "",
+    response_model=RepositoryDetail,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a repository to track",
+)
+async def create_repository(
+    data: RepositoryCreate,
+    db: AsyncSession = Depends(get_db),
+) -> RepositoryDetail:
+    """Add a GitHub repository to the tracking system."""
+    service = RepositoryService(db)
+    repository = await service.add_repository(data.owner, data.name)
+    return RepositoryDetail.model_validate(repository)
+
+
+@router.get(
+    "",
+    response_model=RepositoryList,
+    summary="List all tracked repositories",
+)
+async def list_repositories(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> RepositoryList:
+    """Get a paginated list of all tracked repositories."""
+    service = RepositoryService(db)
+    repositories, total = await service.list_repositories(page, page_size)
+    return RepositoryList(
+        repositories=[RepositoryDetail.model_validate(r) for r in repositories],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
+    "/{owner}/{name}",
+    response_model=RepositoryDetail,
+    summary="Get repository details",
+)
+async def get_repository(
+    owner: str,
+    name: str,
+    db: AsyncSession = Depends(get_db),
+) -> RepositoryDetail:
+    """Get details of a specific tracked repository."""
+    service = RepositoryService(db)
+    repository = await service.get_repository(owner, name)
+    if not repository:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Repository {owner}/{name} not found",
+        )
+    return RepositoryDetail.model_validate(repository)
+
+
+@router.delete(
+    "/{owner}/{name}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove repository from tracking",
+)
+async def delete_repository(
+    owner: str,
+    name: str,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Remove a repository from the tracking system."""
+    service = RepositoryService(db)
+    deleted = await service.delete_repository(owner, name)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Repository {owner}/{name} not found",
+        )
+
+
+@router.post(
+    "/{owner}/{name}/refresh",
+    response_model=dict,
+    summary="Trigger manual data refresh",
+)
+async def refresh_repository(
+    owner: str,
+    name: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Trigger a manual refresh of repository data."""
+    service = RepositoryService(db)
+    job = await service.trigger_refresh(owner, name)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Repository {owner}/{name} not found",
+        )
+    return {"message": "Refresh job queued", "job_id": job.id}

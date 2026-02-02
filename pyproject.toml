@@ -1,0 +1,58 @@
+[project]
+name = "github-contributor-leaderboard"
+version = "1.0.0"
+description = "A comprehensive system for scraping, scoring, and ranking GitHub contributors across multiple repositories"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Your Name", email = "your@email.com" }]
+
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "sqlalchemy>=2.0.25",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.1",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "redis>=5.0.1",
+    "celery>=5.3.6",
+    "httpx>=0.26.0",
+    "google-cloud-bigquery>=3.14.1",
+    "python-dotenv>=1.0.0",
+    "structlog>=24.1.0",
+    "tenacity>=8.2.3",
+    "PyGithub>=2.1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.4",
+    "pytest-asyncio>=0.23.3",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.14",
+    "mypy>=1.8.0",
+    "pre-commit>=3.6.0",
+    "httpx>=0.26.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

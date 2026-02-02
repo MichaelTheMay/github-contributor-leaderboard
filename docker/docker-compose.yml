@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/leaderboard
+      - REDIS_URL=redis://redis:6379/0
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - BIGQUERY_PROJECT=${BIGQUERY_PROJECT}
+      - GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-sa.json
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/secrets/gcp-sa.json:ro
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: celery -A src.workers.celery_app worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/leaderboard
+      - REDIS_URL=redis://redis:6379/0
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - BIGQUERY_PROJECT=${BIGQUERY_PROJECT}
+      - GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-sa.json
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/secrets/gcp-sa.json:ro
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: celery -A src.workers.celery_app beat --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/leaderboard
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=leaderboard
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
