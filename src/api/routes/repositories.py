@@ -105,3 +105,34 @@ async def refresh_repository(
             detail=f"Repository {owner}/{name} not found",
         )
     return {"message": "Refresh job queued", "job_id": job.id}
+
+
+@router.post(
+    "/{owner}/{name}/scrape",
+    response_model=dict,
+    summary="Trigger full BigQuery scrape",
+)
+async def scrape_repository(
+    owner: str,
+    name: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Trigger a full BigQuery scrape for repository data (requires Celery worker)."""
+    from src.workers.tasks.scrape_tasks import trigger_repository_scrape
+
+    service = RepositoryService(db)
+    repository = await service.get_repository(owner, name)
+    if not repository:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Repository {owner}/{name} not found",
+        )
+
+    # Trigger async scrape via Celery
+    result = trigger_repository_scrape.delay(owner, name)
+
+    return {
+        "message": "Scrape job queued",
+        "task_id": result.id,
+        "repository": f"{owner}/{name}",
+    }
