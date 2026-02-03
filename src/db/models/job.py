@@ -1,7 +1,8 @@
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.models.base import Base, TimestampMixin
@@ -35,8 +36,16 @@ class ScrapeJob(Base, TimestampMixin):
     events_processed: Mapped[int] = mapped_column(default=0)
     error_message: Mapped[str | None] = mapped_column(Text)
 
+    # Cost tracking fields
+    estimated_cost: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=Decimal("0"))
+    actual_cost: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=Decimal("0"))
+    bytes_processed: Mapped[int] = mapped_column(BigInteger, default=0)
+    bytes_billed: Mapped[int] = mapped_column(BigInteger, default=0)
+
     # Relationships
     repository = relationship("Repository", back_populates="scrape_jobs")
+    cost_records = relationship("CostRecord", back_populates="job", cascade="all, delete-orphan")
+    scrape_window = relationship("ScrapeWindow", back_populates="job", uselist=False)
 
     __table_args__ = (
         Index("idx_scrape_jobs_repo_status", "repository_id", "status"),

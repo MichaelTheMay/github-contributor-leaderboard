@@ -2,6 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Numeric
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.models.base import Base, TimestampMixin
@@ -48,6 +49,19 @@ class RepositoryLeaderboard(Base, TimestampMixin):
         Index("idx_repo_leaderboard_repo_user", "repository_id", "user_id", unique=True),
         Index("idx_repo_leaderboard_score", "total_score", postgresql_using="btree"),
     )
+
+    @hybrid_property
+    def total_events(self) -> int:
+        """Total number of contribution events (sum of all event counts)."""
+        return (
+            (self.commit_count or 0) +
+            (self.pr_opened_count or 0) +
+            (self.pr_merged_count or 0) +
+            (self.pr_reviewed_count or 0) +
+            (self.issues_opened_count or 0) +
+            (self.issues_closed_count or 0) +
+            (self.comments_count or 0)
+        )
 
     def __repr__(self) -> str:
         return f"<RepositoryLeaderboard repo_id={self.repository_id} rank={self.rank}>"

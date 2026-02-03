@@ -8,11 +8,16 @@ A comprehensive system for scraping, scoring, and ranking GitHub contributors ac
 
 - **Multi-Repository Tracking**: Track contribution activity across any number of public GitHub repositories
 - **Weighted Scoring**: Configurable scoring system for commits, PRs, reviews, issues, and comments
-- **Dual Leaderboards**: Per-repository rankings and global aggregate leaderboard
+- **Dual Leaderboards**: Per-repository rankings AND global master leaderboard aggregating all repos
 - **Profile Enrichment**: Automatic discovery of contributor social media profiles and contact information
 - **BigQuery Integration**: Efficient historical data retrieval from GitHub Archive (2011-present)
-- **Real-time Monitoring Dashboard**: Live logs, job status, and error tracking
+- **Real-time Monitoring Dashboard**: Live logs, job status, global & per-repo leaderboards
 - **Background Processing**: Celery workers for async data ingestion and processing
+- **Pagination**: All leaderboards support pagination to handle large datasets
+
+## Architecture
+
+See [docs/pipeline.md](docs/pipeline.md) for detailed Mermaid diagrams of the full data pipeline.
 
 ## Technology Stack
 

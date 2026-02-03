@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline Control - GitHub Leaderboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+        }
+        .header {
+            background: #161b22;
+            border-bottom: 1px solid #30363d;
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 { font-size: 20px; font-weight: 600; color: #f0f6fc; }
+        .header-links { display: flex; gap: 16px; }
+        .header-links a {
+            color: #58a6ff;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .header-links a:hover { text-decoration: underline; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+        .status-banner {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-banner.info { background: #1f6feb22; border: 1px solid #1f6feb55; }
+        .status-banner.warning { background: #d2992222; border: 1px solid #d2992255; }
+        .status-banner.error { background: #f8514922; border: 1px solid #f8514955; }
+        .status-banner .icon { font-size: 18px; }
+
+        .grid { display: grid; gap: 16px; margin-bottom: 24px; }
+        .grid-2 { grid-template-columns: repeat(2, 1fr); }
+        .grid-3 { grid-template-columns: repeat(3, 1fr); }
+        .grid-4 { grid-template-columns: repeat(4, 1fr); }
+        @media (max-width: 1200px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 768px) { .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } }
+
+        .card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 20px;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #30363d;
+        }
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #f0f6fc;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card-title .icon { font-size: 20px; }
+
+        .stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        .stat-item { text-align: center; padding: 12px; background: #0d1117; border-radius: 6px; }
+        .stat-value { font-size: 28px; font-weight: 700; color: #f0f6fc; }
+        .stat-value.success { color: #3fb950; }
+        .stat-value.warning { color: #d29922; }
+        .stat-value.error { color: #f85149; }
+        .stat-label { font-size: 12px; color: #8b949e; margin-top: 4px; }
+
+        .pipeline-stage {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            transition: all 0.2s;
+        }
+        .pipeline-stage:hover { border-color: #58a6ff; }
+        .pipeline-stage.disabled { opacity: 0.5; pointer-events: none; }
+        .pipeline-stage.hidden { display: none; }
+        .pipeline-stage-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .pipeline-stage-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #f0f6fc;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .pipeline-stage-status {
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-weight: 500;
+        }
+        .pipeline-stage-status.ready { background: #23863533; color: #3fb950; }
+        .pipeline-stage-status.blocked { background: #f8514933; color: #f85149; }
+        .pipeline-stage-status.running { background: #1f6feb33; color: #58a6ff; }
+        .pipeline-stage-desc {
+            font-size: 13px;
+            color: #8b949e;
+            margin-bottom: 12px;
+            line-height: 1.5;
+        }
+        .pipeline-stage-prereq {
+            font-size: 12px;
+            color: #d29922;
+            margin-bottom: 12px;
+            padding: 8px;
+            background: #d2992215;
+            border-radius: 4px;
+        }
+        .pipeline-stage-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+        .btn {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn:hover:not(:disabled) { background: #30363d; border-color: #8b949e; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary { background: #238636; border-color: #238636; color: #fff; }
+        .btn-primary:hover:not(:disabled) { background: #2ea043; }
+        .btn-warning { background: #9e6a03; border-color: #9e6a03; color: #fff; }
+        .btn-warning:hover:not(:disabled) { background: #bb8009; }
+        .btn-danger { background: #da3633; border-color: #da3633; color: #fff; }
+        .btn-danger:hover:not(:disabled) { background: #f85149; }
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+        .toggle-container { display: flex; align-items: center; gap: 10px; }
+        .toggle {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            background: #30363d;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .toggle.active { background: #238636; }
+        .toggle::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 20px;
+            height: 20px;
+            background: #f0f6fc;
+            border-radius: 50%;
+            transition: transform 0.2s;
+        }
+        .toggle.active::after { transform: translateX(20px); }
+        .toggle-label { font-size: 13px; color: #c9d1d9; }
+
+        .input-group { display: flex; align-items: center; gap: 8px; }
+        .input-group label { font-size: 13px; color: #8b949e; white-space: nowrap; }
+        .input-group input, .input-group select {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 13px;
+            width: 80px;
+        }
+        .input-group input:focus, .input-group select:focus {
+            outline: none;
+            border-color: #58a6ff;
+        }
+
+        .repo-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+        }
+        .repo-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            border-bottom: 1px solid #21262d;
+            transition: background 0.15s;
+        }
+        .repo-item:last-child { border-bottom: none; }
+        .repo-item:hover { background: #1c2128; }
+        .repo-item-info { display: flex; flex-direction: column; gap: 2px; }
+        .repo-item-name { color: #58a6ff; font-weight: 500; font-size: 14px; }
+        .repo-item-meta { font-size: 11px; color: #8b949e; }
+        .repo-item-status {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 500;
+        }
+        .repo-item-status.completed { background: #23863533; color: #3fb950; }
+        .repo-item-status.pending { background: #8b949e33; color: #8b949e; }
+        .repo-item-status.failed { background: #f8514933; color: #f85149; }
+        .repo-item-status.scraping { background: #1f6feb33; color: #58a6ff; }
+
+        .log-panel {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            height: 250px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .log-header {
+            background: #161b22;
+            padding: 8px 12px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .log-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 12px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        .log-line { padding: 2px 0; }
+        .log-line.info { color: #58a6ff; }
+        .log-line.warning { color: #d29922; }
+        .log-line.error { color: #f85149; }
+        .log-time { color: #6e7681; margin-right: 8px; }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #30363d;
+            border-top-color: #58a6ff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #f0f6fc;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .flow-diagram {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 20px;
+            background: #0d1117;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .flow-step {
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            text-align: center;
+            min-width: 100px;
+        }
+        .flow-step.active { background: #238636; color: #fff; }
+        .flow-step.ready { background: #1f6feb33; color: #58a6ff; border: 1px solid #1f6feb; }
+        .flow-step.waiting { background: #30363d; color: #8b949e; }
+        .flow-arrow { color: #30363d; font-size: 20px; }
+
+        /* Budget styles */
+        .budget-progress {
+            width: 100%;
+            height: 12px;
+            background: #21262d;
+            border-radius: 6px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+        .budget-progress-bar {
+            height: 100%;
+            border-radius: 6px;
+            transition: width 0.3s ease;
+        }
+        .budget-progress-bar.ok { background: #238636; }
+        .budget-progress-bar.warning { background: #d29922; }
+        .budget-progress-bar.critical { background: #f85149; }
+        .budget-stat {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            color: #8b949e;
+            margin-bottom: 4px;
+        }
+        .budget-stat-value { color: #f0f6fc; font-weight: 500; }
+        .cost-estimate {
+            background: #1f6feb15;
+            border: 1px solid #1f6feb44;
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 10px;
+        }
+        .cost-estimate-title {
+            font-size: 12px;
+            color: #58a6ff;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        .cost-estimate-value {
+            font-size: 18px;
+            font-weight: 600;
+            color: #f0f6fc;
+        }
+        .cost-estimate-meta {
+            font-size: 11px;
+            color: #8b949e;
+            margin-top: 4px;
+        }
+        .audit-entry {
+            padding: 8px 12px;
+            border-bottom: 1px solid #21262d;
+            font-size: 12px;
+        }
+        .audit-entry:last-child { border-bottom: none; }
+        .audit-entry-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+        .audit-entry-action {
+            font-weight: 500;
+            color: #f0f6fc;
+        }
+        .audit-entry-time { color: #6e7681; }
+        .audit-entry-desc { color: #8b949e; }
+        .audit-entry-cost { color: #3fb950; font-weight: 500; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Pipeline Control Center</h1>
+        <div class="header-links">
+            <a href="/dashboard">Monitoring Dashboard</a>
+            <a href="/api/v1/leaderboard/global" target="_blank">Global Leaderboard API</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Status Messages -->
+        <div id="statusMessages"></div>
+
+        <!-- Pipeline Flow Visualization -->
+        <div class="flow-diagram" id="flowDiagram">
+            <div class="flow-step waiting" id="flow-add">Add Repo</div>
+            <div class="flow-arrow">&#8594;</div>
+            <div class="flow-step waiting" id="flow-scrape">Scrape Data</div>
+            <div class="flow-arrow">&#8594;</div>
+            <div class="flow-step waiting" id="flow-score">Calculate Scores</div>
+            <div class="flow-arrow">&#8594;</div>
+            <div class="flow-step waiting" id="flow-rank">Rank Repos</div>
+            <div class="flow-arrow">&#8594;</div>
+            <div class="flow-step waiting" id="flow-global">Aggregate Global</div>
+        </div>
+
+        <div class="grid grid-4">
+            <!-- Stats Cards -->
+            <div class="card">
+                <div class="stat-item" style="padding: 0;">
+                    <div class="stat-value" id="statRepos">-</div>
+                    <div class="stat-label">Repositories Tracked</div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="stat-item" style="padding: 0;">
+                    <div class="stat-value" id="statCompleted">-</div>
+                    <div class="stat-label">Completed Scrapes</div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="stat-item" style="padding: 0;">
+                    <div class="stat-value" id="statContributors">-</div>
+                    <div class="stat-label">Total Contributors</div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="stat-item" style="padding: 0;">
+                    <div class="stat-value" id="statActiveJobs">-</div>
+                    <div class="stat-label">Active Jobs</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Budget Section -->
+        <div class="grid grid-3" style="margin-bottom: 16px;">
+            <!-- Daily Budget -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title"><span class="icon">&#128176;</span> Daily Budget</span>
+                </div>
+                <div class="budget-stat">
+                    <span>Spent Today</span>
+                    <span class="budget-stat-value" id="budgetDailySpent">$0.00</span>
+                </div>
+                <div class="budget-progress">
+                    <div class="budget-progress-bar ok" id="budgetDailyBar" style="width: 0%"></div>
+                </div>
+                <div class="budget-stat">
+                    <span>Daily Limit</span>
+                    <span class="budget-stat-value" id="budgetDailyLimit">$10.00</span>
+                </div>
+            </div>
+
+            <!-- Monthly Budget -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title"><span class="icon">&#128197;</span> Monthly Budget</span>
+                </div>
+                <div class="budget-stat">
+                    <span>Spent This Month</span>
+                    <span class="budget-stat-value" id="budgetMonthlySpent">$0.00</span>
+                </div>
+                <div class="budget-progress">
+                    <div class="budget-progress-bar ok" id="budgetMonthlyBar" style="width: 0%"></div>
+                </div>
+                <div class="budget-stat">
+                    <span>Monthly Limit</span>
+                    <span class="budget-stat-value" id="budgetMonthlyLimit">$50.00</span>
+                </div>
+            </div>
+
+            <!-- BigQuery Stats -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title"><span class="icon">&#128202;</span> BigQuery Usage</span>
+                </div>
+                <div class="stat-grid" style="grid-template-columns: 1fr 1fr;">
+                    <div class="stat-item" style="padding: 8px;">
+                        <div class="stat-value" style="font-size: 18px;" id="bqBytesProcessed">0</div>
+                        <div class="stat-label">GB Processed Today</div>
+                    </div>
+                    <div class="stat-item" style="padding: 8px;">
+                        <div class="stat-value" style="font-size: 18px;" id="bqJobsRun">0</div>
+                        <div class="stat-label">Jobs Today</div>
+                    </div>
+                </div>
+                <div style="margin-top: 8px; font-size: 12px; color: #8b949e;">
+                    Price: <span id="bqPricePerTB">$5.00</span>/TB
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-2">
+            <!-- Pipeline Stages -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title"><span class="icon">&#9881;</span> Pipeline Stages</span>
+                    <button class="btn btn-sm" onclick="refreshStatus()">Refresh</button>
+                </div>
+
+                <!-- Stage 1: Add Repository -->
+                <div class="pipeline-stage" id="stage-add">
+                    <div class="pipeline-stage-header">
+                        <span class="pipeline-stage-title">
+                            <span>1.</span> Add Repository
+                        </span>
+                        <span class="pipeline-stage-status ready">Ready</span>
+                    </div>
+                    <div class="pipeline-stage-desc">
+                        Add a new GitHub repository to track. The repository will be validated via the GitHub API.
+                    </div>
+                    <div class="pipeline-stage-actions">
+                        <div class="input-group">
+                            <input type="text" id="newRepoOwner" placeholder="owner" style="width: 100px;">
+                            <span>/</span>
+                            <input type="text" id="newRepoName" placeholder="repo" style="width: 120px;">
+                        </div>
+                        <button class="btn btn-primary" onclick="addRepository()">Add Repository</button>
+                    </div>
+                </div>
+
+                <!-- Stage 2: Scrape Repository -->
+                <div class="pipeline-stage" id="stage-scrape">
+                    <div class="pipeline-stage-header">
+                        <span class="pipeline-stage-title">
+                            <span>2.</span> Scrape Repository Data
+                        </span>
+                        <span class="pipeline-stage-status" id="scrape-status">Checking...</span>
+                    </div>
+                    <div class="pipeline-stage-desc">
+                        Fetch contribution data from BigQuery GitHub Archive. This queries historical events.
+                    </div>
+                    <div class="pipeline-stage-prereq" id="scrape-prereq" style="display: none;">
+                        Prerequisite: Add at least one repository first.
+                    </div>
+                    <div class="pipeline-stage-actions">
+                        <select id="scrapeRepoSelect" class="btn" style="min-width: 180px;" onchange="updateCostEstimate()">
+                            <option value="">Select repository...</option>
+                        </select>
+                        <div class="input-group">
+                            <label>Lookback:</label>
+                            <select id="scrapeLookback" onchange="updateCostEstimate()">
+                                <option value="365">1 year</option>
+                                <option value="730" selected>2 years</option>
+                                <option value="1095">3 years</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-primary" id="btnScrape" onclick="scrapeRepository()">Scrape</button>
+                        <button class="btn btn-warning" id="btnScrapeAll" onclick="scrapeAllPending()">Scrape All Pending</button>
+                    </div>
+                    <!-- Cost Estimate -->
+                    <div class="cost-estimate" id="costEstimate" style="display: none;">
+                        <div class="cost-estimate-title">Estimated Cost for Scrape</div>
+                        <div class="cost-estimate-value" id="costEstimateValue">$0.00</div>
+                        <div class="cost-estimate-meta">
+                            <span id="costEstimateMeta">Select a repository to see estimate</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stage 3: Recalculate Scores -->
+                <div class="pipeline-stage" id="stage-scores">
+                    <div class="pipeline-stage-header">
+                        <span class="pipeline-stage-title">
+                            <span>3.</span> Recalculate Scores
+                        </span>
+                        <span class="pipeline-stage-status" id="scores-status">Checking...</span>
+                    </div>
+                    <div class="pipeline-stage-desc">
+                        Apply the current scoring formula to all leaderboard entries. Use this after changing scoring weights.
+                    </div>
+                    <div class="pipeline-stage-prereq" id="scores-prereq" style="display: none;">
+                        Prerequisite: Scrape at least one repository first.
+                    </div>
+                    <div class="pipeline-stage-actions">
+                        <button class="btn btn-primary" id="btnRecalcScores" onclick="recalculateScores()">Recalculate All Scores</button>
+                    </div>
+                </div>
+
+                <!-- Stage 4: Aggregate Global Leaderboard -->
+                <div class="pipeline-stage" id="stage-global">
+                    <div class="pipeline-stage-header">
+                        <span class="pipeline-stage-title">
+                            <span>4.</span> Aggregate Global Leaderboard
+                        </span>
+                        <span class="pipeline-stage-status" id="global-status">Checking...</span>
+                    </div>
+                    <div class="pipeline-stage-desc">
+                        Combine all repository leaderboards into the master global leaderboard with unified rankings.
+                    </div>
+                    <div class="pipeline-stage-prereq" id="global-prereq" style="display: none;">
+                        Prerequisite: Repository leaderboard data must exist.
+                    </div>
+                    <div class="pipeline-stage-actions">
+                        <button class="btn btn-primary" id="btnRecalcGlobal" onclick="recalculateGlobal()">Aggregate Global</button>
+                    </div>
+                </div>
+
+                <!-- Stage 5: Maintenance -->
+                <div class="pipeline-stage" id="stage-maintenance">
+                    <div class="pipeline-stage-header">
+                        <span class="pipeline-stage-title">
+                            <span>5.</span> Maintenance
+                        </span>
+                        <span class="pipeline-stage-status ready">Available</span>
+                    </div>
+                    <div class="pipeline-stage-desc">
+                        Refresh stale repositories and clean up stuck jobs.
+                    </div>
+                    <div class="pipeline-stage-actions">
+                        <button class="btn" id="btnRefreshStale" onclick="refreshStale()">Refresh Stale Repos</button>
+                        <button class="btn btn-danger" onclick="cleanupJobs()">Cleanup Stuck Jobs</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Settings & Repos -->
+            <div>
+                <!-- Budget Configuration -->
+                <div class="card" style="margin-bottom: 16px;">
+                    <div class="card-header">
+                        <span class="card-title"><span class="icon">&#128176;</span> Budget Config</span>
+                        <button class="btn btn-sm" onclick="saveBudgetConfig()">Save</button>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div class="input-group" style="flex-direction: column; align-items: flex-start;">
+                            <label>Daily Limit ($)</label>
+                            <input type="number" id="cfgDailyLimit" value="10.00" step="0.01" min="0" style="width: 100%;">
+                        </div>
+                        <div class="input-group" style="flex-direction: column; align-items: flex-start;">
+                            <label>Monthly Limit ($)</label>
+                            <input type="number" id="cfgMonthlyLimit" value="50.00" step="0.01" min="0" style="width: 100%;">
+                        </div>
+                        <div class="input-group" style="flex-direction: column; align-items: flex-start;">
+                            <label>Per-Job Limit ($)</label>
+                            <input type="number" id="cfgPerJobLimit" value="5.00" step="0.01" min="0" style="width: 100%;">
+                        </div>
+                        <div class="input-group" style="flex-direction: column; align-items: flex-start;">
+                            <label>BQ Price/TB ($)</label>
+                            <input type="number" id="cfgPricePerTB" value="5.00" step="0.01" min="0" style="width: 100%;">
+                        </div>
+                    </div>
+                    <div style="margin-top: 12px;">
+                        <div class="toggle-container">
+                            <div class="toggle" id="toggleAutoPause" onclick="toggleBudgetSetting('auto_pause')"></div>
+                            <span class="toggle-label">Auto-pause on budget exceeded</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Audit Log -->
+                <div class="card" style="margin-bottom: 16px;">
+                    <div class="card-header">
+                        <span class="card-title"><span class="icon">&#128203;</span> Recent Audit</span>
+                        <button class="btn btn-sm" onclick="refreshAuditLog()">Refresh</button>
+                    </div>
+                    <div id="auditLogContainer" style="max-height: 200px; overflow-y: auto;">
+                        <div style="padding: 20px; text-align: center; color: #8b949e;">Loading audit log...</div>
+                    </div>
+                </div>
+
+                <!-- Automation Settings -->
+                <div class="card" style="margin-bottom: 16px;">
+                    <div class="card-header">
+                        <span class="card-title"><span class="icon">&#9889;</span> Automation Settings</span>
+                        <button class="btn btn-sm" onclick="saveSettings()">Save</button>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 16px;">
+                        <div class="toggle-container">
+                            <div class="toggle" id="toggleAutoRefresh" onclick="toggleSetting('auto_refresh_stale_repos')"></div>
+                            <span class="toggle-label">Auto-refresh stale repositories (hourly)</span>
+                        </div>
+                        <div class="toggle-container">
+                            <div class="toggle" id="toggleAutoGlobalAfterScrape" onclick="toggleSetting('auto_recalc_global_after_scrape')"></div>
+                            <span class="toggle-label">Auto-aggregate global after each scrape</span>
+                        </div>
+                        <div class="toggle-container">
+                            <div class="toggle" id="toggleAutoGlobalInterval" onclick="toggleSetting('auto_recalc_global_interval')"></div>
+                            <span class="toggle-label">Auto-recalculate global (every 30 min)</span>
+                        </div>
+
+                        <div class="input-group" style="margin-top: 8px;">
+                            <label>Stale threshold:</label>
+                            <input type="number" id="staleThreshold" value="24" min="1" max="168" style="width: 60px;">
+                            <span style="font-size: 13px; color: #8b949e;">hours</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Repository List -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title"><span class="icon">&#128230;</span> Repositories</span>
+                        <span id="repoCount" style="font-size: 13px; color: #8b949e;">0 repos</span>
+                    </div>
+                    <div class="repo-list" id="repoList">
+                        <div style="padding: 40px; text-align: center; color: #8b949e;">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Activity Log -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title"><span class="icon">&#128221;</span> Activity Log</span>
+                <button class="btn btn-sm" onclick="clearLog()">Clear</button>
+            </div>
+            <div class="log-panel">
+                <div class="log-content" id="logContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let pipelineStatus = null;
+        let settings = {};
+        let budgetConfig = {};
+        let ws = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            connectWebSocket();
+            refreshStatus();
+            refreshBudgetStatus();
+            refreshBudgetConfig();
+            refreshAuditLog();
+            setInterval(refreshStatus, 10000);
+            setInterval(refreshBudgetStatus, 30000);
+        });
+
+        // Budget Functions
+        async function refreshBudgetStatus() {
+            try {
+                // Fetch both status and analytics for complete picture
+                const [statusRes, analyticsRes] = await Promise.all([
+                    fetch('/dashboard/budget/status'),
+                    fetch('/dashboard/budget/analytics?days=1')
+                ]);
+                const status = await statusRes.json();
+                const analytics = await analyticsRes.json();
+
+                updateBudgetUI(status, analytics);
+            } catch (err) {
+                console.error('Failed to fetch budget status:', err);
+            }
+        }
+
+        function updateBudgetUI(status, analytics) {
+            // Daily budget - use API field names with _usd suffix
+            const dailySpent = status.daily_spent_usd || 0;
+            const dailyLimit = status.daily_limit_usd || 10;
+            const dailyPct = status.daily_percentage || Math.min((dailySpent / dailyLimit) * 100, 100);
+            document.getElementById('budgetDailySpent').textContent = `$${dailySpent.toFixed(2)}`;
+            document.getElementById('budgetDailyLimit').textContent = `$${dailyLimit.toFixed(2)}`;
+            const dailyBar = document.getElementById('budgetDailyBar');
+            dailyBar.style.width = `${Math.min(dailyPct, 100)}%`;
+            dailyBar.className = `budget-progress-bar ${dailyPct >= 90 ? 'critical' : dailyPct >= 70 ? 'warning' : 'ok'}`;
+
+            // Monthly budget - use API field names with _usd suffix
+            const monthlySpent = status.monthly_spent_usd || 0;
+            const monthlyLimit = status.monthly_limit_usd || 50;
+            const monthlyPct = status.monthly_percentage || Math.min((monthlySpent / monthlyLimit) * 100, 100);
+            document.getElementById('budgetMonthlySpent').textContent = `$${monthlySpent.toFixed(2)}`;
+            document.getElementById('budgetMonthlyLimit').textContent = `$${monthlyLimit.toFixed(2)}`;
+            const monthlyBar = document.getElementById('budgetMonthlyBar');
+            monthlyBar.style.width = `${Math.min(monthlyPct, 100)}%`;
+            monthlyBar.className = `budget-progress-bar ${monthlyPct >= 90 ? 'critical' : monthlyPct >= 70 ? 'warning' : 'ok'}`;
+
+            // BigQuery stats from analytics
+            if (analytics && analytics.totals) {
+                const gbProcessed = (analytics.totals.bytes_billed || 0) / (1024 * 1024 * 1024);
+                document.getElementById('bqBytesProcessed').textContent = gbProcessed.toFixed(2);
+                document.getElementById('bqJobsRun').textContent = analytics.totals.jobs || 0;
+            }
+            if (analytics && analytics.config) {
+                document.getElementById('bqPricePerTB').textContent = `$${(analytics.config.price_per_tb_usd || 5).toFixed(2)}`;
+            }
+
+            // Show warning level indicator
+            const bqEl = document.getElementById('bqBytesProcessed');
+            bqEl.classList.remove('error', 'warning');
+            if (status.warning_level === 'critical') {
+                bqEl.classList.add('error');
+            } else if (status.warning_level === 'warning') {
+                bqEl.classList.add('warning');
+            }
+        }
+
+        async function refreshBudgetConfig() {
+            try {
+                const response = await fetch('/dashboard/budget/config');
+                budgetConfig = await response.json();
+                // API returns fields with _usd suffix
+                document.getElementById('cfgDailyLimit').value = budgetConfig.daily_budget_limit_usd || 10;
+                document.getElementById('cfgMonthlyLimit').value = budgetConfig.monthly_budget_limit_usd || 50;
+                document.getElementById('cfgPerJobLimit').value = budgetConfig.per_job_limit_usd || 5;
+                document.getElementById('cfgPricePerTB').value = budgetConfig.bigquery_price_per_tb_usd || 5;
+                document.getElementById('toggleAutoPause').classList.toggle('active', budgetConfig.auto_pause_on_budget_exceeded);
+            } catch (err) {
+                console.error('Failed to fetch budget config:', err);
+            }
+        }
+
+        function toggleBudgetSetting(key) {
+            if (key === 'auto_pause') {
+                budgetConfig.auto_pause_on_budget_exceeded = !budgetConfig.auto_pause_on_budget_exceeded;
+                document.getElementById('toggleAutoPause').classList.toggle('active');
+            }
+        }
+
+        async function saveBudgetConfig() {
+            const config = {
+                daily_budget_limit: parseFloat(document.getElementById('cfgDailyLimit').value) || 10,
+                monthly_budget_limit: parseFloat(document.getElementById('cfgMonthlyLimit').value) || 50,
+                per_job_limit: parseFloat(document.getElementById('cfgPerJobLimit').value) || 5,
+                bigquery_price_per_tb: parseFloat(document.getElementById('cfgPricePerTB').value) || 5,
+                auto_pause_on_budget_exceeded: budgetConfig.auto_pause_on_budget_exceeded,
+            };
+            try {
+                const response = await fetch('/dashboard/budget/config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config),
+                });
+                if (response.ok) {
+                    showNotification('Budget configuration saved!', 'success');
+                    refreshBudgetStatus();
+                } else {
+                    showNotification('Failed to save budget config', 'error');
+                }
+            } catch (err) {
+                showNotification('Failed to save budget config', 'error');
+            }
+        }
+
+        async function updateCostEstimate() {
+            const repo = document.getElementById('scrapeRepoSelect').value;
+            const estimateDiv = document.getElementById('costEstimate');
+
+            if (!repo) {
+                estimateDiv.style.display = 'none';
+                return;
+            }
+
+            const [owner, name] = repo.split('/');
+            const lookbackDays = parseInt(document.getElementById('scrapeLookback').value);
+
+            try {
+                const response = await fetch(`/dashboard/budget/estimate/${owner}/${name}?lookback_days=${lookbackDays}`);
+                const data = await response.json();
+
+                estimateDiv.style.display = 'block';
+                // API returns estimated_cost_usd field
+                const cost = data.estimated_cost_usd || data.estimated_cost || 0;
+                document.getElementById('costEstimateValue').textContent = `$${cost.toFixed(4)}`;
+                document.getElementById('costEstimateMeta').innerHTML = `
+                    Est. ${data.estimated_bytes_human || ((data.estimated_bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB')} |
+                    ${lookbackDays} day lookback |
+                    ${data.can_proceed ? '<span style="color: #3fb950;">Within budget</span>' : '<span style="color: #f85149;">Exceeds budget</span>'}
+                `;
+            } catch (err) {
+                estimateDiv.style.display = 'block';
+                document.getElementById('costEstimateValue').textContent = '—';
+                document.getElementById('costEstimateMeta').textContent = 'Unable to estimate cost';
+            }
+        }
+
+        async function refreshAuditLog() {
+            try {
+                const response = await fetch('/dashboard/audit/logs?limit=10');
+                const data = await response.json();
+                renderAuditLog(data.logs || []);
+            } catch (err) {
+                console.error('Failed to fetch audit logs:', err);
+                document.getElementById('auditLogContainer').innerHTML =
+                    '<div style="padding: 20px; text-align: center; color: #8b949e;">Failed to load audit log</div>';
+            }
+        }
+
+        function renderAuditLog(logs) {
+            const container = document.getElementById('auditLogContainer');
+            if (logs.length === 0) {
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #8b949e;">No audit entries yet</div>';
+                return;
+            }
+            container.innerHTML = logs.map(log => `
+                <div class="audit-entry">
+                    <div class="audit-entry-header">
+                        <span class="audit-entry-action">${formatAction(log.action)}</span>
+                        <span class="audit-entry-time">${formatTime(log.timestamp)}</span>
+                    </div>
+                    <div class="audit-entry-desc">${log.description || ''}</div>
+                    ${log.actual_cost_usd ? `<div class="audit-entry-cost">Cost: $${log.actual_cost_usd.toFixed(4)}</div>` : ''}
+                </div>
+            `).join('');
+        }
+
+        function formatAction(action) {
+            return action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            const now = new Date();
+            const diff = now - date;
+            if (diff < 60000) return 'Just now';
+            if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+            if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+            return date.toLocaleDateString();
+        }
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/dashboard/ws/logs`);
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'log') {
+                    addLogEntry(data);
+                }
+            };
+
+            ws.onclose = () => {
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+
+        function addLogEntry(data) {
+            const container = document.getElementById('logContent');
+            const entry = document.createElement('div');
+            entry.className = `log-line ${data.level}`;
+            const time = new Date(data.timestamp).toLocaleTimeString();
+            entry.innerHTML = `<span class="log-time">${time}</span>[${data.level.toUpperCase()}] ${data.message}`;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+
+            // Keep only last 200 entries
+            while (container.children.length > 200) {
+                container.removeChild(container.firstChild);
+            }
+        }
+
+        function clearLog() {
+            document.getElementById('logContent').innerHTML = '';
+        }
+
+        async function refreshStatus() {
+            try {
+                const response = await fetch('/dashboard/pipeline/status');
+                pipelineStatus = await response.json();
+                updateUI();
+            } catch (err) {
+                console.error('Failed to fetch pipeline status:', err);
+            }
+        }
+
+        function updateUI() {
+            if (!pipelineStatus) return;
+
+            const { repositories, jobs, leaderboards, contributors, prerequisites, settings: s, messages } = pipelineStatus;
+
+            // Update stats
+            document.getElementById('statRepos').textContent = repositories.total;
+            document.getElementById('statCompleted').textContent = repositories.by_status.completed || 0;
+            document.getElementById('statContributors').textContent = contributors.total.toLocaleString();
+            document.getElementById('statActiveJobs').textContent = jobs.active;
+            document.getElementById('statActiveJobs').className = `stat-value ${jobs.active > 0 ? 'warning' : ''}`;
+
+            // Update flow diagram
+            updateFlowStep('flow-add', repositories.total > 0);
+            updateFlowStep('flow-scrape', (repositories.by_status.completed || 0) > 0);
+            updateFlowStep('flow-score', leaderboards.repository_entries > 0);
+            updateFlowStep('flow-rank', leaderboards.repository_entries > 0);
+            updateFlowStep('flow-global', leaderboards.global_entries > 0);
+
+            // Update stage statuses
+            updateStageStatus('scrape', prerequisites.can_scrape_repository, !prerequisites.can_scrape_repository && repositories.total === 0);
+            updateStageStatus('scores', prerequisites.can_recalculate_repo_leaderboard, !prerequisites.can_recalculate_repo_leaderboard);
+            updateStageStatus('global', prerequisites.can_recalculate_global_leaderboard, !prerequisites.can_recalculate_global_leaderboard);
+
+            // Show/hide prereq messages
+            document.getElementById('scrape-prereq').style.display = repositories.total === 0 ? 'block' : 'none';
+            document.getElementById('scores-prereq').style.display = leaderboards.repository_entries === 0 ? 'block' : 'none';
+            document.getElementById('global-prereq').style.display = leaderboards.repository_entries === 0 ? 'block' : 'none';
+
+            // Update buttons
+            document.getElementById('btnScrape').disabled = !prerequisites.can_scrape_repository;
+            document.getElementById('btnScrapeAll').disabled = !prerequisites.can_scrape_repository;
+            document.getElementById('btnRecalcScores').disabled = !prerequisites.can_recalculate_repo_leaderboard;
+            document.getElementById('btnRecalcGlobal').disabled = !prerequisites.can_recalculate_global_leaderboard;
+            document.getElementById('btnRefreshStale').disabled = !prerequisites.can_refresh_stale;
+
+            // Update repo selector
+            const select = document.getElementById('scrapeRepoSelect');
+            const currentVal = select.value;
+            select.innerHTML = '<option value="">Select repository...</option>';
+            repositories.scrapable.forEach(repo => {
+                const opt = document.createElement('option');
+                opt.value = repo.full_name;
+                opt.textContent = `${repo.full_name} (${repo.status})`;
+                select.appendChild(opt);
+            });
+            if (currentVal) select.value = currentVal;
+
+            // Update repo list
+            renderRepoList(repositories.scrapable);
+
+            // Update settings toggles
+            settings = s;
+            document.getElementById('toggleAutoRefresh').classList.toggle('active', s.auto_refresh_stale_repos);
+            document.getElementById('toggleAutoGlobalAfterScrape').classList.toggle('active', s.auto_recalc_global_after_scrape);
+            document.getElementById('toggleAutoGlobalInterval').classList.toggle('active', s.auto_recalc_global_interval);
+            document.getElementById('staleThreshold').value = s.stale_threshold_hours;
+
+            // Update status messages
+            const msgContainer = document.getElementById('statusMessages');
+            msgContainer.innerHTML = messages.map(m => `
+                <div class="status-banner ${m.type}">
+                    <span class="icon">${m.type === 'info' ? '&#9432;' : m.type === 'warning' ? '&#9888;' : '&#10060;'}</span>
+                    <span>${m.text}</span>
+                </div>
+            `).join('');
+
+            // Update repo count
+            document.getElementById('repoCount').textContent = `${repositories.total} repos`;
+        }
+
+        function updateFlowStep(id, completed) {
+            const el = document.getElementById(id);
+            el.classList.remove('active', 'ready', 'waiting');
+            el.classList.add(completed ? 'active' : 'waiting');
+        }
+
+        function updateStageStatus(stage, ready, blocked) {
+            const statusEl = document.getElementById(`${stage}-status`);
+            if (blocked) {
+                statusEl.textContent = 'Blocked';
+                statusEl.className = 'pipeline-stage-status blocked';
+            } else if (ready) {
+                statusEl.textContent = 'Ready';
+                statusEl.className = 'pipeline-stage-status ready';
+            } else {
+                statusEl.textContent = 'Waiting';
+                statusEl.className = 'pipeline-stage-status blocked';
+            }
+        }
+
+        function renderRepoList(repos) {
+            const container = document.getElementById('repoList');
+            if (repos.length === 0) {
+                container.innerHTML = '<div style="padding: 40px; text-align: center; color: #8b949e;">No repositories yet</div>';
+                return;
+            }
+            container.innerHTML = repos.map(repo => `
+                <div class="repo-item">
+                    <div class="repo-item-info">
+                        <span class="repo-item-name">${repo.full_name}</span>
+                        <span class="repo-item-meta">${repo.stars?.toLocaleString() || 0} stars | Last scraped: ${repo.last_scraped ? new Date(repo.last_scraped).toLocaleDateString() : 'Never'}</span>
+                    </div>
+                    <span class="repo-item-status ${repo.status}">${repo.status}</span>
+                </div>
+            `).join('');
+        }
+
+        function toggleSetting(key) {
+            settings[key] = !settings[key];
+            document.getElementById(`toggle${key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('')}`.replace('Stale_repos', 'AutoRefresh').replace('Global_after_scrape', 'AutoGlobalAfterScrape').replace('Global_interval', 'AutoGlobalInterval')).classList.toggle('active');
+        }
+
+        async function saveSettings() {
+            settings.stale_threshold_hours = parseInt(document.getElementById('staleThreshold').value) || 24;
+            try {
+                await fetch('/dashboard/pipeline/settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings),
+                });
+                showNotification('Settings saved!', 'success');
+            } catch (err) {
+                showNotification('Failed to save settings', 'error');
+            }
+        }
+
+        async function addRepository() {
+            const owner = document.getElementById('newRepoOwner').value.trim();
+            const name = document.getElementById('newRepoName').value.trim();
+            if (!owner || !name) {
+                showNotification('Please enter owner and repository name', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/v1/repositories', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ owner, name }),
+                });
+                if (response.ok) {
+                    showNotification(`Repository ${owner}/${name} added!`, 'success');
+                    document.getElementById('newRepoOwner').value = '';
+                    document.getElementById('newRepoName').value = '';
+                    refreshStatus();
+                } else {
+                    const err = await response.json();
+                    showNotification(err.detail || 'Failed to add repository', 'error');
+                }
+            } catch (err) {
+                showNotification('Failed to add repository', 'error');
+            }
+        }
+
+        async function scrapeRepository() {
+            const repo = document.getElementById('scrapeRepoSelect').value;
+            if (!repo) {
+                showNotification('Please select a repository', 'error');
+                return;
+            }
+            const lookback = document.getElementById('scrapeLookback').value;
+            const [owner, name] = repo.split('/');
+
+            try {
+                const response = await fetch(`/dashboard/pipeline/scrape/${owner}/${name}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lookback_days: parseInt(lookback), force: false }),
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    showNotification(`Scrape queued for ${repo} (Job #${data.job_id})`, 'success');
+                    refreshStatus();
+                } else {
+                    const err = await response.json();
+                    showNotification(err.detail || 'Failed to start scrape', 'error');
+                }
+            } catch (err) {
+                showNotification('Failed to start scrape', 'error');
+            }
+        }
+
+        async function scrapeAllPending() {
+            const lookback = document.getElementById('scrapeLookback').value;
+            try {
+                const response = await fetch('/dashboard/pipeline/scrape-all-pending', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lookback_days: parseInt(lookback), force: false }),
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    showNotification(`${data.queued.length} repositories queued for scraping`, 'success');
+                    refreshStatus();
+                } else {
+                    const err = await response.json();
+                    showNotification(err.detail || 'Failed to start batch scrape', 'error');
+                }
+            } catch (err) {
+                showNotification('Failed to start batch scrape', 'error');
+            }
+        }
+
+        async function recalculateScores() {
+            try {
+                showNotification('Recalculating scores...', 'info');
+                const response = await fetch('/dashboard/pipeline/recalculate-scores', { method: 'POST' });
+                if (response.ok) {
+                    const data = await response.json();
+                    showNotification(`Recalculated ${data.entries_recalculated} entries across ${data.repositories_ranked} repos`, 'success');
+                    refreshStatus();
+                } else {
+                    const err = await response.json();
+                    showNotification(err.detail || 'Failed to recalculate scores', 'error');
+                }
+            } catch (err) {
+                showNotification('Failed to recalculate scores', 'error');
+            }
+        }
+
+        async function recalculateGlobal() {
+            try {
+                const response = await fetch('/dashboard/pipeline/recalculate-global', { method: 'POST' });
+                if (response.ok) {
+                    const data = await response.json();
+                    showNotification(`Global leaderboard aggregation queued (Task: ${data.task_id})`, 'success');
+                    refreshStatus();
+                } else {
+                    const err = await response.json();
+                    showNotification(err.detail || 'Failed to recalculate global', 'error');
+                }
+            } catch (err) {
+                showNotification('Failed to recalculate global', 'error');
+            }
+        }
+
+        async function refreshStale() {
+            try {
+                const response = await fetch('/dashboard/pipeline/refresh-stale', { method: 'POST' });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.status === 'no_action') {
+                        showNotification('No stale repositories found', 'info');
+                    } else {
+                        showNotification(`${data.repositories_queued.length} stale repositories queued for refresh`, 'success');
+                    }
+                    refreshStatus();
+                } else {
+                    const err = await response.json();
+                    showNotification(err.detail || 'Failed to refresh stale repos', 'error');
+                }
+            } catch (err) {
+                showNotification('Failed to refresh stale repos', 'error');
+            }
+        }
+
+        async function cleanupJobs() {
+            if (!confirm('This will mark all stuck jobs as failed and reset stuck repositories. Continue?')) return;
+
+            try {
+                const response = await fetch('/dashboard/pipeline/cleanup-jobs?max_age_hours=2', { method: 'POST' });
+                if (response.ok) {
+                    const data = await response.json();
+                    showNotification(`Cleaned up ${data.jobs_cleaned.length} jobs, reset ${data.repositories_reset.length} repos`, 'success');
+                    refreshStatus();
+                } else {
+                    const err = await response.json();
+                    showNotification(err.detail || 'Failed to cleanup jobs', 'error');
+                }
+            } catch (err) {
+                showNotification('Failed to cleanup jobs', 'error');
+            }
+        }
+
+        function showNotification(message, type) {
+            // Add to log
+            addLogEntry({
+                level: type === 'success' ? 'info' : type,
+                message: message,
+                timestamp: new Date().toISOString(),
+            });
+        }
+    </script>
+</body>
+</html>

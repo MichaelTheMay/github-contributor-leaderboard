@@ -277,6 +277,7 @@
     <div class="header">
         <h1>GitHub Contributor Leaderboard - Monitoring</h1>
         <div class="status">
+            <a href="/dashboard/pipeline" style="color: #58a6ff; text-decoration: none; margin-right: 20px; font-size: 14px;">Pipeline Control</a>
             <span class="status-dot" id="connectionStatus"></span>
             <span id="connectionText">Connected</span>
         </div>
@@ -347,7 +348,46 @@
 
         <div class="card" style="margin-bottom: 24px;">
             <div class="card-header">
-                <span class="card-title">🏆 Contributor Leaderboard</span>
+                <span class="card-title">GLOBAL MASTER LEADERBOARD</span>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <span id="globalTotal" style="color: #8b949e; font-size: 13px;">0 contributors</span>
+                    <button class="btn btn-primary" onclick="loadGlobalLeaderboard()">Refresh</button>
+                </div>
+            </div>
+            <p style="color: #6e7681; font-size: 12px; margin-bottom: 12px; padding-left: 4px;">
+                Aggregated scores across all tracked repositories. Score = Commits(10) + PRs Opened(15) + PRs Merged(25) + Reviews(20) + Issues(8) + Comments(3) + Line Bonus(max 500)
+            </p>
+            <div class="leaderboard-scroll" style="max-height: 500px;">
+                <table class="leaderboard-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 60px;">Rank</th>
+                            <th style="min-width: 150px;">Contributor</th>
+                            <th style="width: 100px; text-align: right;">Score</th>
+                            <th style="width: 60px; text-align: center;" title="Repositories Contributed">Repos</th>
+                            <th style="width: 70px; text-align: center;">Commits</th>
+                            <th style="width: 80px; text-align: center;" title="Pull Requests Merged">PRs</th>
+                            <th style="width: 70px; text-align: center;" title="Code Reviews">Reviews</th>
+                            <th style="width: 70px; text-align: center;">Issues</th>
+                            <th style="width: 80px; text-align: center;">Comments</th>
+                            <th style="width: 100px; text-align: center;" title="Lines of Code Added">Lines</th>
+                        </tr>
+                    </thead>
+                    <tbody id="globalLeaderboardTable">
+                        <tr><td colspan="10" style="text-align: center; color: #8b949e; padding: 40px;">Loading global leaderboard...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div style="display: flex; justify-content: center; gap: 10px; margin-top: 15px;">
+                <button class="btn" id="globalPrevBtn" onclick="globalPage > 1 && (globalPage--, loadGlobalLeaderboard())" disabled>Previous</button>
+                <span id="globalPageInfo" style="padding: 6px 12px; color: #8b949e;">Page 1</span>
+                <button class="btn" id="globalNextBtn" onclick="globalPage++; loadGlobalLeaderboard()">Next</button>
+            </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+                <span class="card-title">🏆 Per-Repository Leaderboard</span>
                 <div style="display: flex; gap: 10px; align-items: center;">
                     <select id="repoSelector" class="repo-selector" onchange="loadLeaderboard()">
                         <option value="">Select repository...</option>
@@ -624,11 +664,80 @@
             }).join('');
         }
 
+        // Global leaderboard state
+        let globalPage = 1;
+        const globalPageSize = 50;
+        let globalTotal = 0;
+
+        async function loadGlobalLeaderboard() {
+            const tbody = document.getElementById('globalLeaderboardTable');
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #8b949e; padding: 40px;">Loading...</td></tr>';
+
+            try {
+                const response = await fetch(`/api/v1/leaderboard/global?page=${globalPage}&page_size=${globalPageSize}`);
+                const data = await response.json();
+                globalTotal = data.total || 0;
+                renderGlobalLeaderboard(data.entries || []);
+                updateGlobalPagination();
+            } catch (err) {
+                console.error('Failed to fetch global leaderboard:', err);
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #f85149; padding: 40px;">Failed to load global leaderboard</td></tr>';
+            }
+        }
+
+        function renderGlobalLeaderboard(entries) {
+            const tbody = document.getElementById('globalLeaderboardTable');
+            document.getElementById('globalTotal').textContent = `${globalTotal.toLocaleString()} contributors across all repos`;
+
+            if (entries.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: #8b949e; padding: 40px;">No contributors found. Scrape some repositories first!</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = entries.map(entry => {
+                const rankClass = entry.global_rank <= 3 ? `rank-${entry.global_rank}` : '';
+                const medal = entry.global_rank === 1 ? '&#x1F947;' : entry.global_rank === 2 ? '&#x1F948;' : entry.global_rank === 3 ? '&#x1F949;' : '';
+
+                // Format lines added with K/M suffix
+                const linesFormatted = formatNumber(entry.total_lines_added || 0);
+
+                // Check if this is a "low activity" contributor (0 commits/PRs but high score from lines)
+                const hasRealActivity = entry.total_commits > 0 || entry.total_prs_merged > 0 || entry.total_prs_reviewed > 0;
+
+                return `
+                    <tr style="${!hasRealActivity ? 'opacity: 0.7;' : ''}">
+                        <td class="rank-cell ${rankClass}">${medal} #${entry.global_rank}</td>
+                        <td>
+                            <a href="${entry.user.profile_url}" target="_blank" rel="noopener noreferrer" class="user-link">
+                                @${entry.user.username}
+                            </a>
+                        </td>
+                        <td class="score-cell" style="text-align: right;">${parseFloat(entry.total_score).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</td>
+                        <td class="stat-cell" style="text-align: center;">${entry.repositories_contributed}</td>
+                        <td class="stat-cell" style="text-align: center; ${entry.total_commits > 0 ? 'color: #58a6ff; font-weight: 500;' : ''}">${entry.total_commits}</td>
+                        <td class="stat-cell" style="text-align: center; ${entry.total_prs_merged > 0 ? 'color: #a371f7; font-weight: 500;' : ''}">${entry.total_prs_merged}</td>
+                        <td class="stat-cell" style="text-align: center; ${entry.total_prs_reviewed > 0 ? 'color: #3fb950; font-weight: 500;' : ''}">${entry.total_prs_reviewed}</td>
+                        <td class="stat-cell" style="text-align: center;">${entry.total_issues_opened}</td>
+                        <td class="stat-cell" style="text-align: center;">${entry.total_comments}</td>
+                        <td class="stat-cell" style="text-align: center; color: #6e7681; font-size: 11px;">${linesFormatted}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function updateGlobalPagination() {
+            const totalPages = Math.ceil(globalTotal / globalPageSize);
+            document.getElementById('globalPageInfo').textContent = `Page ${globalPage} of ${totalPages}`;
+            document.getElementById('globalPrevBtn').disabled = globalPage <= 1;
+            document.getElementById('globalNextBtn').disabled = globalPage >= totalPages;
+        }
+
         // Initialize
         connect();
         refreshStats();
         refreshJobs();
         refreshRepos();
+        loadGlobalLeaderboard();
 
         // Auto-refresh every 10 seconds
         setInterval(() => {
@@ -636,6 +745,11 @@
             refreshJobs();
             refreshRepos();
         }, 10000);
+
+        // Refresh global leaderboard every 30 seconds
+        setInterval(() => {
+            loadGlobalLeaderboard();
+        }, 30000);
     </script>
 </body>
 </html>

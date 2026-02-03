@@ -70,7 +70,7 @@ Thumbs.db
 *.db
 *.sqlite
 
-# Alembic
-migrations/versions/*.py
-!migrations/versions/.gitkeep
+# Alembic (track migration files, they should be version controlled)
+!migrations/versions/*.py
+migrations/versions/__pycache__/
 secrets/

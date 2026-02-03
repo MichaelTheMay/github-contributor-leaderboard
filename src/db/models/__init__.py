@@ -1,10 +1,12 @@
 from src.db.models.base import Base
+from src.db.models.budget import AuditLog, BudgetConfig, CostRecord, DailyCostSummary
 from src.db.models.contribution import ContributionEvent
 from src.db.models.enrichment import ContributorEnrichment
 from src.db.models.job import ScrapeJob
 from src.db.models.leaderboard import GlobalLeaderboard, RepositoryLeaderboard
 from src.db.models.repository import Repository
 from src.db.models.scoring import ScoringWeight
+from src.db.models.scrape_history import ScrapeWindow
 from src.db.models.user import GitHubUser
 
 __all__ = [
@@ -16,5 +18,10 @@ __all__ = [
     "RepositoryLeaderboard",
     "GlobalLeaderboard",
     "ScrapeJob",
+    "ScrapeWindow",
     "ContributorEnrichment",
+    "BudgetConfig",
+    "CostRecord",
+    "DailyCostSummary",
+    "AuditLog",
 ]

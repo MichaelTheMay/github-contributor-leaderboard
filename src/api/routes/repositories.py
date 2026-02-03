@@ -115,9 +115,13 @@ async def refresh_repository(
 async def scrape_repository(
     owner: str,
     name: str,
+    force: bool = Query(False, description="Force re-scrape even if already completed"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Trigger a full BigQuery scrape for repository data (requires Celery worker)."""
+    from sqlalchemy import select
+    from src.db.models.job import JobStatus, ScrapeJob
+    from src.db.models.repository import RepositoryStatus
     from src.workers.tasks.scrape_tasks import trigger_repository_scrape
 
     service = RepositoryService(db)
@@ -127,6 +131,29 @@ async def scrape_repository(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Repository {owner}/{name} not found",
         )
+
+    # Check if already scraping or has pending job
+    pending_job = await db.execute(
+        select(ScrapeJob).where(
+            ScrapeJob.repository_id == repository.id,
+            ScrapeJob.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),
+        )
+    )
+    if pending_job.scalar_one_or_none():
+        return {
+            "message": "Scrape already in progress or queued",
+            "repository": f"{owner}/{name}",
+            "status": "already_queued",
+        }
+
+    # Check if already completed and not forcing
+    if repository.status == RepositoryStatus.COMPLETED and not force:
+        return {
+            "message": "Repository already scraped. Use force=true to re-scrape.",
+            "repository": f"{owner}/{name}",
+            "status": "already_completed",
+            "last_scraped": repository.last_scraped_at.isoformat() if repository.last_scraped_at else None,
+        }
 
     # Trigger async scrape via Celery
     result = trigger_repository_scrape.delay(owner, name)

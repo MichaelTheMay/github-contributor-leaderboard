@@ -57,11 +57,52 @@ ORDER BY event_timestamp DESC
 """
 
 
+class BigQueryJobStats:
+    """Statistics from a BigQuery job execution."""
+
+    def __init__(
+        self,
+        bytes_processed: int = 0,
+        bytes_billed: int = 0,
+        slot_millis: int = 0,
+        cache_hit: bool = False,
+    ):
+        self.bytes_processed = bytes_processed
+        self.bytes_billed = bytes_billed
+        self.slot_millis = slot_millis
+        self.cache_hit = cache_hit
+
+    def to_dict(self) -> dict:
+        return {
+            "bytes_processed": self.bytes_processed,
+            "bytes_billed": self.bytes_billed,
+            "slot_millis": self.slot_millis,
+            "cache_hit": self.cache_hit,
+        }
+
+
 class BigQueryService:
     """Service for fetching GitHub events from BigQuery."""
 
     def __init__(self) -> None:
         self.client = bigquery.Client(project=settings.bigquery_project)
+        self._last_job_stats: BigQueryJobStats | None = None
+
+    @property
+    def last_job_stats(self) -> BigQueryJobStats | None:
+        """Get statistics from the last executed query."""
+        return self._last_job_stats
+
+    def _capture_job_stats(self, query_job: bigquery.QueryJob) -> BigQueryJobStats:
+        """Capture statistics from a completed query job."""
+        stats = BigQueryJobStats(
+            bytes_processed=query_job.total_bytes_processed or 0,
+            bytes_billed=query_job.total_bytes_billed or 0,
+            slot_millis=query_job.slot_millis or 0,
+            cache_hit=query_job.cache_hit or False,
+        )
+        self._last_job_stats = stats
+        return stats
 
     async def fetch_events_for_repositories(
         self,
@@ -164,7 +205,11 @@ class BigQueryService:
             repo.name as repo_name,
             actor.id as user_id,
             actor.login as username,
-            COUNT(CASE WHEN type = 'PushEvent' THEN 1 END) as commit_events,
+            -- Count actual commits from PushEvents (payload.size = number of commits in push)
+            SUM(CASE
+                WHEN type = 'PushEvent' THEN COALESCE(CAST(JSON_EXTRACT_SCALAR(payload, '$.size') AS INT64), 1)
+                ELSE 0
+            END) as commit_events,
             COUNT(CASE WHEN type = 'PullRequestEvent' AND JSON_EXTRACT_SCALAR(payload, '$.action') = 'opened' THEN 1 END) as prs_opened,
             COUNT(CASE WHEN type = 'PullRequestEvent' AND JSON_EXTRACT_SCALAR(payload, '$.action') = 'closed' AND JSON_EXTRACT_SCALAR(payload, '$.pull_request.merged') = 'true' THEN 1 END) as prs_merged,
             COUNT(CASE WHEN type = 'PullRequestReviewEvent' THEN 1 END) as prs_reviewed,
@@ -172,6 +217,8 @@ class BigQueryService:
             COUNT(CASE WHEN type = 'IssuesEvent' AND JSON_EXTRACT_SCALAR(payload, '$.action') = 'closed' THEN 1 END) as issues_closed,
             COUNT(CASE WHEN type = 'IssueCommentEvent' THEN 1 END) as comments,
             COUNT(CASE WHEN type = 'ReleaseEvent' THEN 1 END) as releases,
+            -- Count total events for display (different from commit count)
+            COUNT(*) as total_events,
             SUM(CAST(COALESCE(JSON_EXTRACT_SCALAR(payload, '$.pull_request.additions'), '0') AS INT64)) as total_lines_added,
             SUM(CAST(COALESCE(JSON_EXTRACT_SCALAR(payload, '$.pull_request.deletions'), '0') AS INT64)) as total_lines_deleted,
             MIN(created_at) as first_contribution,
@@ -187,6 +234,9 @@ class BigQueryService:
             query_job = self.client.query(aggregation_query)
             results = query_job.result()
 
+            # Capture job statistics for cost tracking
+            job_stats = self._capture_job_stats(query_job)
+
             stats = []
             for row in results:
                 stats.append(
@@ -194,7 +244,7 @@ class BigQueryService:
                         "repo_name": row.repo_name,
                         "user_id": row.user_id,
                         "username": row.username,
-                        "commit_events": row.commit_events,
+                        "commit_events": row.commit_events or 0,
                         "prs_opened": row.prs_opened,
                         "prs_merged": row.prs_merged,
                         "prs_reviewed": row.prs_reviewed,
@@ -202,6 +252,7 @@ class BigQueryService:
                         "issues_closed": row.issues_closed,
                         "comments": row.comments,
                         "releases": row.releases,
+                        "total_events": row.total_events,
                         "total_lines_added": row.total_lines_added,
                         "total_lines_deleted": row.total_lines_deleted,
                         "first_contribution": row.first_contribution,
@@ -209,9 +260,33 @@ class BigQueryService:
                     }
                 )
 
-            logger.info("BigQuery aggregation complete", stats_count=len(stats))
+            logger.info(
+                "BigQuery aggregation complete",
+                stats_count=len(stats),
+                bytes_processed=job_stats.bytes_processed,
+                bytes_billed=job_stats.bytes_billed,
+                cache_hit=job_stats.cache_hit,
+            )
             return stats
 
         except Exception as e:
             logger.error("BigQuery aggregation failed", error=str(e))
             raise
+
+    def get_last_query_cost_estimate(self, price_per_tb_usd: float = 5.0) -> dict:
+        """Get cost estimate from the last executed query."""
+        if not self._last_job_stats:
+            return {"error": "No query executed yet"}
+
+        bytes_per_tb = 1024 * 1024 * 1024 * 1024
+        tb_billed = self._last_job_stats.bytes_billed / bytes_per_tb
+        estimated_cost = tb_billed * price_per_tb_usd
+
+        return {
+            "bytes_processed": self._last_job_stats.bytes_processed,
+            "bytes_billed": self._last_job_stats.bytes_billed,
+            "tb_billed": round(tb_billed, 6),
+            "estimated_cost_usd": round(estimated_cost, 6),
+            "cache_hit": self._last_job_stats.cache_hit,
+            "price_per_tb_usd": price_per_tb_usd,
+        }

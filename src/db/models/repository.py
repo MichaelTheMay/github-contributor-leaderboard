@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import BigInteger, Computed, Index, String, Text
+from sqlalchemy import BigInteger, Computed, DateTime, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.models.base import Base, TimestampMixin
@@ -35,6 +35,20 @@ class Repository(Base, TimestampMixin):
     )
     last_scraped_at: Mapped[datetime | None] = mapped_column()
 
+    # Scrape tracking fields for incremental scraping
+    first_scraped_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+    earliest_data_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+    latest_data_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+    never_rescrape_before: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+
     # Relationships
     contribution_events = relationship(
         "ContributionEvent",
@@ -50,6 +64,15 @@ class Repository(Base, TimestampMixin):
         "ScrapeJob",
         back_populates="repository",
         cascade="all, delete-orphan",
+    )
+    scrape_windows = relationship(
+        "ScrapeWindow",
+        back_populates="repository",
+        cascade="all, delete-orphan",
+    )
+    cost_records = relationship(
+        "CostRecord",
+        back_populates="repository",
     )
 
     __table_args__ = (
