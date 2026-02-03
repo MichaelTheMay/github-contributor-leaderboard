@@ -1,6 +1,6 @@
 import asyncio
+import os
 from collections.abc import AsyncGenerator, Generator
-from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -12,7 +12,11 @@ from src.db import get_db
 from src.db.models import Base
 
 
-TEST_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/leaderboard_test"
+# Use environment variable if set, otherwise use local default
+TEST_DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/leaderboard_test",
+)
 
 test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 test_session_maker = async_sessionmaker(
