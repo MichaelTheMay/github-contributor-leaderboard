@@ -16,9 +16,21 @@ on:
           - refresh-stale
           - recalculate-leaderboards
           - scrape-specific
+          - enrich-top-contributors
+          - enrichment-backfill
       repository:
         description: 'Repository to scrape (owner/name) - only for scrape-specific'
         required: false
+        type: string
+      enrichment_limit:
+        description: 'Number of users to enrich (for enrich-top-contributors)'
+        required: false
+        default: '100'
+        type: string
+      enrichment_percent:
+        description: 'Top % to enrich (for enrichment-backfill, e.g., 1.0 = top 1%)'
+        required: false
+        default: '1.0'
         type: string
       dry_run:
         description: 'Dry run (log only, no actual changes)'
@@ -219,7 +231,32 @@ jobs:
                       except Exception as e:
                           logger.error("global_recalc_failed", error=str(e))
 
-                  # Step 4: Log completion
+                  # Step 4: Auto-enrich top unenriched contributors
+                  logger.info("starting_auto_enrichment")
+                  if not dry_run:
+                      try:
+                          from src.workers.tasks.enrichment_tasks import _batch_enrich_unenriched_async
+                          # Enrich top 50 unenriched contributors per run
+                          enrich_result = await _batch_enrich_unenriched_async(
+                              limit=50,
+                              rate_limit_delay=2.0,
+                          )
+                          logger.info("auto_enrichment_completed",
+                              enriched=enrich_result.get('enriched_count', 0),
+                              failed=enrich_result.get('failed_count', 0)
+                          )
+                      except Exception as e:
+                          logger.error("auto_enrichment_failed", error=str(e))
+
+                  # Step 5: Get enrichment stats for summary
+                  enrichment_stats = {}
+                  try:
+                      from src.workers.tasks.enrichment_tasks import _get_enrichment_stats_async
+                      enrichment_stats = await _get_enrichment_stats_async()
+                  except Exception as e:
+                      logger.warning("failed_to_get_enrichment_stats", error=str(e))
+
+                  # Step 6: Log completion
                   await budget_service.log_audit(
                       action=AuditAction.JOB_COMPLETED,
                       category="scheduled_pipeline",
@@ -227,6 +264,7 @@ jobs:
                       extra_data={
                           "stale_repos_found": len(stale_repos),
                           "dry_run": dry_run,
+                          "enrichment_stats": enrichment_stats,
                       }
                   )
 
@@ -241,6 +279,11 @@ jobs:
                   print(f"Budget status: {'OK' if status['can_proceed'] else 'EXCEEDED'}")
                   print(f"Daily spend: ${status['daily_spent_usd']:.4f} / ${status['daily_limit_usd']:.2f}")
                   print(f"Monthly spend: ${status['monthly_spent_usd']:.4f} / ${status['monthly_limit_usd']:.2f}")
+                  if enrichment_stats:
+                      print(f"\nENRICHMENT STATUS")
+                      print(f"Total users: {enrichment_stats.get('total_users', 0)}")
+                      print(f"Enriched: {enrichment_stats.get('enriched', 0)}")
+                      print(f"Coverage: {enrichment_stats.get('coverage_percent', 0):.1f}%")
                   print(f"{'='*50}")
 
           if __name__ == "__main__":
@@ -300,6 +343,89 @@ jobs:
 
           asyncio.run(scrape())
           "
+
+      - name: Enrich Top Contributors
+        if: ${{ github.event.inputs.action == 'enrich-top-contributors' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          ENRICHMENT_LIMIT: ${{ github.event.inputs.enrichment_limit || '100' }}
+        run: |
+          echo "Enriching top $ENRICHMENT_LIMIT unenriched contributors"
+          python << 'ENRICH_SCRIPT'
+          import asyncio
+          import os
+
+          async def enrich():
+              limit = int(os.environ.get('ENRICHMENT_LIMIT', '100'))
+
+              from src.workers.tasks.enrichment_tasks import _batch_enrich_unenriched_async, _get_enrichment_stats_async
+
+              # Get stats before
+              stats_before = await _get_enrichment_stats_async()
+              print(f"Before enrichment: {stats_before['enriched']}/{stats_before['total_users']} enriched ({stats_before['coverage_percent']:.1f}%)")
+
+              # Run enrichment
+              result = await _batch_enrich_unenriched_async(limit=limit, rate_limit_delay=2.0)
+
+              # Get stats after
+              stats_after = await _get_enrichment_stats_async()
+              print(f"\n{'='*50}")
+              print("ENRICHMENT SUMMARY")
+              print(f"{'='*50}")
+              print(f"Users enriched: {result['enriched_count']}")
+              print(f"Failed: {result['failed_count']}")
+              print(f"Coverage: {stats_before['coverage_percent']:.1f}% -> {stats_after['coverage_percent']:.1f}%")
+              print(f"{'='*50}")
+
+          asyncio.run(enrich())
+          ENRICH_SCRIPT
+
+      - name: Enrichment Backfill
+        if: ${{ github.event.inputs.action == 'enrichment-backfill' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          ENRICHMENT_PERCENT: ${{ github.event.inputs.enrichment_percent || '1.0' }}
+        run: |
+          echo "Running enrichment backfill for top $ENRICHMENT_PERCENT%"
+          python << 'BACKFILL_SCRIPT'
+          import asyncio
+          import os
+
+          async def backfill():
+              percent = float(os.environ.get('ENRICHMENT_PERCENT', '1.0'))
+
+              from src.workers.tasks.enrichment_tasks import _backfill_enrichment_async, _get_enrichment_stats_async
+
+              # Get stats before
+              stats_before = await _get_enrichment_stats_async()
+              print(f"Before backfill: {stats_before['enriched']}/{stats_before['total_users']} enriched ({stats_before['coverage_percent']:.1f}%)")
+
+              # Run backfill
+              result = await _backfill_enrichment_async(
+                  top_percent=percent,
+                  max_users=500,  # Limit per run to avoid timeout
+                  rate_limit_delay=2.0,
+              )
+
+              # Get stats after
+              stats_after = await _get_enrichment_stats_async()
+              print(f"\n{'='*50}")
+              print("BACKFILL SUMMARY")
+              print(f"{'='*50}")
+              print(f"Target: Top {percent}% of contributors")
+              print(f"Users enriched: {result.get('enriched_count', 0)}")
+              print(f"Failed: {result.get('failed_count', 0)}")
+              print(f"Coverage: {stats_before['coverage_percent']:.1f}% -> {stats_after['coverage_percent']:.1f}%")
+              print(f"Contacts found:")
+              print(f"  Twitter: {stats_after['contacts_found']['twitter']}")
+              print(f"  LinkedIn: {stats_after['contacts_found']['linkedin']}")
+              print(f"  Email: {stats_after['contacts_found']['email']}")
+              print(f"{'='*50}")
+
+          asyncio.run(backfill())
+          BACKFILL_SCRIPT
 
       - name: Cleanup credentials
         if: always()
