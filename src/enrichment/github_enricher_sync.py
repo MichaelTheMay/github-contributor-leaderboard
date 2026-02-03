@@ -4,7 +4,8 @@ This module provides a synchronous version of GitHubEnricher for use in Celery
 workers, which run in separate processes without an asyncio event loop.
 """
 
-from datetime import datetime, timezone
+import contextlib
+from datetime import UTC, datetime
 
 import httpx
 import structlog
@@ -126,7 +127,7 @@ class GitHubEnricherSync:
 
             # Update enrichment status
             enrichment.enrichment_sources = {"sources": sources_found}
-            enrichment.last_enriched_at = datetime.now(timezone.utc)
+            enrichment.last_enriched_at = datetime.now(UTC)
 
             if sources_found:
                 # Check how many fields were populated
@@ -186,12 +187,10 @@ class GitHubEnricherSync:
         # Parse created_at
         created_at_str = profile.get("created_at")
         if created_at_str:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 enrichment.github_created_at = datetime.fromisoformat(
                     created_at_str.replace("Z", "+00:00")
                 )
-            except (ValueError, TypeError):
-                pass
 
         # Extract Twitter from profile
         if profile.get("twitter_username"):

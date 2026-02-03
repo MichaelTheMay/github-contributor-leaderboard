@@ -4,7 +4,8 @@ This module provides an asynchronous version of GitHubEnricher for use in
 FastAPI routes with asyncpg.
 """
 
-from datetime import datetime, timezone
+import contextlib
+from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,7 +66,7 @@ class GitHubEnricher:
 
             # Update enrichment status
             enrichment.enrichment_sources = {"sources": sources_found}
-            enrichment.last_enriched_at = datetime.now(timezone.utc)
+            enrichment.last_enriched_at = datetime.now(UTC)
 
             if sources_found:
                 # Check how many fields were populated
@@ -125,12 +126,10 @@ class GitHubEnricher:
         # Parse created_at
         created_at_str = profile.get("created_at")
         if created_at_str:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 enrichment.github_created_at = datetime.fromisoformat(
                     created_at_str.replace("Z", "+00:00")
                 )
-            except (ValueError, TypeError):
-                pass
 
         # Extract Twitter from profile
         if profile.get("twitter_username"):

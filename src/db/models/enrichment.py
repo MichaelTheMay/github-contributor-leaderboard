@@ -141,28 +141,50 @@ class ContributorEnrichment(Base, TimestampMixin):
 
         # Social platforms
         social_fields = [
-            self.twitter_username, self.linkedin_url, self.mastodon_handle,
-            self.youtube_channel, self.bluesky_handle, self.threads_username,
-            self.instagram_username, self.facebook_url, self.reddit_username,
-            self.twitch_username, self.tiktok_username,
+            self.twitter_username,
+            self.linkedin_url,
+            self.mastodon_handle,
+            self.youtube_channel,
+            self.bluesky_handle,
+            self.threads_username,
+            self.instagram_username,
+            self.facebook_url,
+            self.reddit_username,
+            self.twitch_username,
+            self.tiktok_username,
         ]
         counts["social"] = sum(1 for f in social_fields if f)
 
         # Professional platforms
         prof_fields = [
-            self.dev_to_username, self.medium_username, self.substack_url,
-            self.github_sponsors_url, self.hackernews_username, self.stackoverflow_url,
-            self.kaggle_username, self.npm_username, self.pypi_username,
-            self.gitlab_username, self.bitbucket_username, self.codepen_username,
-            self.dribbble_username, self.behance_username,
+            self.dev_to_username,
+            self.medium_username,
+            self.substack_url,
+            self.github_sponsors_url,
+            self.hackernews_username,
+            self.stackoverflow_url,
+            self.kaggle_username,
+            self.npm_username,
+            self.pypi_username,
+            self.gitlab_username,
+            self.bitbucket_username,
+            self.codepen_username,
+            self.dribbble_username,
+            self.behance_username,
         ]
         counts["professional"] = sum(1 for f in prof_fields if f)
 
         # Contact info
         contact_fields = [
-            self.personal_website, self.personal_email, self.work_email,
-            self.discord_username, self.telegram_username, self.signal_username,
-            self.keybase_username, self.matrix_handle, self.slack_workspace,
+            self.personal_website,
+            self.personal_email,
+            self.work_email,
+            self.discord_username,
+            self.telegram_username,
+            self.signal_username,
+            self.keybase_username,
+            self.matrix_handle,
+            self.slack_workspace,
         ]
         counts["contact"] = sum(1 for f in contact_fields if f)
 

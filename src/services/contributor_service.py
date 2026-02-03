@@ -10,7 +10,7 @@ from src.api.schemas.contributor import (
     ContributorRepository,
 )
 from src.db.models.contribution import ContributionEvent
-from src.db.models.leaderboard import GlobalLeaderboard, RepositoryLeaderboard
+from src.db.models.leaderboard import RepositoryLeaderboard
 from src.db.models.repository import Repository
 from src.db.models.user import GitHubUser
 

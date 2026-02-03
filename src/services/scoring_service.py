@@ -18,8 +18,14 @@ DEFAULT_WEIGHTS = {
     EventType.PR_MERGED.value: (settings.default_pr_merged_points, "Points for merged PR"),
     EventType.PR_REVIEWED.value: (settings.default_pr_reviewed_points, "Points for PR review"),
     EventType.PR_REVIEW_COMMENT.value: (5.0, "Points for PR review comment"),
-    EventType.ISSUE_OPENED.value: (settings.default_issue_opened_points, "Points for opening issue"),
-    EventType.ISSUE_CLOSED.value: (settings.default_issue_closed_points, "Points for closing issue"),
+    EventType.ISSUE_OPENED.value: (
+        settings.default_issue_opened_points,
+        "Points for opening issue",
+    ),
+    EventType.ISSUE_CLOSED.value: (
+        settings.default_issue_closed_points,
+        "Points for closing issue",
+    ),
     EventType.COMMENT.value: (settings.default_comment_points, "Points per comment"),
     EventType.RELEASE.value: (settings.default_release_points, "Points for publishing release"),
 }
@@ -108,10 +114,10 @@ class ScoringService:
 
         # Add line-based bonus for commits
         if event_type == EventType.COMMIT.value:
-            line_bonus = (
-                Decimal(str(lines_added)) * Decimal(str(settings.default_lines_added_multiplier))
-                + Decimal(str(lines_deleted))
-                * Decimal(str(settings.default_lines_deleted_multiplier))
+            line_bonus = Decimal(str(lines_added)) * Decimal(
+                str(settings.default_lines_added_multiplier)
+            ) + Decimal(str(lines_deleted)) * Decimal(
+                str(settings.default_lines_deleted_multiplier)
             )
             base_score += line_bonus
 

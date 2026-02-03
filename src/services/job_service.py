@@ -54,21 +54,17 @@ class JobService:
         formatted = []
         for job in jobs:
             # Handle both enum and string values for job_type and status
-            job_type = job.job_type.value if hasattr(job.job_type, 'value') else str(job.job_type)
-            status = job.status.value if hasattr(job.status, 'value') else str(job.status)
+            job_type = job.job_type.value if hasattr(job.job_type, "value") else str(job.job_type)
+            status = job.status.value if hasattr(job.status, "value") else str(job.status)
 
             formatted.append(
                 {
                     "id": job.id,
-                    "repository": (
-                        job.repository.full_name if job.repository else "Unknown"
-                    ),
+                    "repository": (job.repository.full_name if job.repository else "Unknown"),
                     "job_type": job_type,
                     "status": status,
                     "started_at": job.started_at.isoformat() if job.started_at else None,
-                    "completed_at": (
-                        job.completed_at.isoformat() if job.completed_at else None
-                    ),
+                    "completed_at": (job.completed_at.isoformat() if job.completed_at else None),
                     "events_processed": job.events_processed,
                     "error_message": job.error_message,
                     "created_at": job.created_at.isoformat(),

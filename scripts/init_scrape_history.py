@@ -14,10 +14,23 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from contextlib import asynccontextmanager
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.database import get_async_session
+from src.db.database import async_session_maker
+
+
+@asynccontextmanager
+async def get_async_session():
+    """Context manager for database sessions."""
+    async with async_session_maker() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
 
 
 MIGRATION_SQL = """

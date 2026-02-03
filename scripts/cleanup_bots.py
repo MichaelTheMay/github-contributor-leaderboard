@@ -16,13 +16,26 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from contextlib import asynccontextmanager
+
 from sqlalchemy import delete, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.database import get_async_session
+from src.db.database import async_session_maker
 from src.db.models.contribution import ContributionEvent
 from src.db.models.leaderboard import GlobalLeaderboard, RepositoryLeaderboard
 from src.db.models.user import GitHubUser
+
+
+@asynccontextmanager
+async def get_async_session():
+    """Context manager for database sessions."""
+    async with async_session_maker() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
 
 # Bot account patterns to filter out
 BOT_PATTERNS = [
@@ -191,12 +204,12 @@ async def show_user_stats(db: AsyncSession) -> None:
 
     # Check for discrepancies
     if total_users != global_entries:
-        print(f"\n⚠️  Discrepancy: {total_users - global_entries} users without global leaderboard entries")
+        print(f"\n[!] Discrepancy: {total_users - global_entries} users without global leaderboard entries")
 
     # Find potential bot patterns
     bots = await find_bot_accounts(db)
     if bots:
-        print(f"\n⚠️  Found {len(bots)} potential bot accounts that should be cleaned up")
+        print(f"\n[!] Found {len(bots)} potential bot accounts that should be cleaned up")
 
 
 async def main(dry_run: bool = True):

@@ -6,7 +6,7 @@ Also includes async functions for direct use in GitHub Actions pipelines.
 
 import asyncio
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import structlog
 
@@ -109,7 +109,7 @@ def enrich_contributor(self, user_id: int) -> dict:
             retries=self.request.retries,
         )
         # Exponential backoff: 2min, 4min, 8min
-        raise self.retry(exc=exc, countdown=120 * (2**self.request.retries))
+        raise self.retry(exc=exc, countdown=120 * (2**self.request.retries)) from exc
 
 
 @celery_app.task(bind=True, max_retries=2)
@@ -152,7 +152,7 @@ def batch_enrich_top_contributors(
 
         with get_sync_db() as db:
             # Get cutoff for "recently enriched" (7 days)
-            enrichment_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+            enrichment_cutoff = datetime.now(UTC) - timedelta(days=7)
 
             # Build query for top contributors needing enrichment
             query = (
@@ -196,12 +196,14 @@ def batch_enrich_top_contributors(
                         countdown=countdown,
                     )
 
-                    queued.append({
-                        "user_id": user.id,
-                        "username": user.username,
-                        "task_id": task.id,
-                        "countdown": countdown,
-                    })
+                    queued.append(
+                        {
+                            "user_id": user.id,
+                            "username": user.username,
+                            "task_id": task.id,
+                            "countdown": countdown,
+                        }
+                    )
 
                     logger.debug(
                         "Queued enrichment task",
@@ -218,11 +220,13 @@ def batch_enrich_top_contributors(
                         username=user.username,
                         error=str(e),
                     )
-                    skipped.append({
-                        "user_id": user.id,
-                        "username": user.username,
-                        "error": str(e),
-                    })
+                    skipped.append(
+                        {
+                            "user_id": user.id,
+                            "username": user.username,
+                            "error": str(e),
+                        }
+                    )
 
             logger.info(
                 "Batch enrichment tasks queued",
@@ -244,7 +248,7 @@ def batch_enrich_top_contributors(
             error=str(exc),
             retries=self.request.retries,
         )
-        raise self.retry(exc=exc, countdown=60)
+        raise self.retry(exc=exc, countdown=60) from exc
 
 
 @celery_app.task(rate_limit="5/m")
@@ -381,7 +385,7 @@ async def _batch_enrich_unenriched_async(
 
     async with create_worker_session_maker()() as db:
         # Get cutoff for "recently enriched" (7 days)
-        enrichment_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        enrichment_cutoff = datetime.now(UTC) - timedelta(days=7)
 
         # Build query for top contributors needing enrichment
         query = (
@@ -439,14 +443,16 @@ async def _batch_enrich_unenriched_async(
                 await db.commit()
 
                 status_val = enrichment.enrichment_status
-                if hasattr(status_val, 'value'):
+                if hasattr(status_val, "value"):
                     status_val = status_val.value
 
-                enriched.append({
-                    "username": user.username,
-                    "status": status_val,
-                    "fields_found": enrichment.count_sources_found().get("total", 0),
-                })
+                enriched.append(
+                    {
+                        "username": user.username,
+                        "status": status_val,
+                        "fields_found": enrichment.count_sources_found().get("total", 0),
+                    }
+                )
 
                 logger.info(
                     "User enriched successfully",
@@ -461,10 +467,12 @@ async def _batch_enrich_unenriched_async(
                     username=user.username,
                     error=str(e),
                 )
-                failed.append({
-                    "username": user.username,
-                    "error": str(e),
-                })
+                failed.append(
+                    {
+                        "username": user.username,
+                        "error": str(e),
+                    }
+                )
                 await db.rollback()
 
             # Rate limit delay between users (except last one)
@@ -499,19 +507,17 @@ async def _get_enrichment_stats_async() -> dict:
     from src.db.database import create_worker_session_maker
     from src.db.models.enrichment import ContributorEnrichment, EnrichmentStatus
     from src.db.models.leaderboard import GlobalLeaderboard
-    from src.db.models.user import GitHubUser
 
     async with create_worker_session_maker()() as db:
         # Total users in global leaderboard
-        total_result = await db.execute(
-            select(func.count(GlobalLeaderboard.user_id))
-        )
+        total_result = await db.execute(select(func.count(GlobalLeaderboard.user_id)))
         total_users = total_result.scalar() or 0
 
         # Count enriched users
         enriched_result = await db.execute(
-            select(func.count(ContributorEnrichment.id))
-            .where(ContributorEnrichment.last_enriched_at.isnot(None))
+            select(func.count(ContributorEnrichment.id)).where(
+                ContributorEnrichment.last_enriched_at.isnot(None)
+            )
         )
         enriched_count = enriched_result.scalar() or 0
 
@@ -519,22 +525,26 @@ async def _get_enrichment_stats_async() -> dict:
         status_counts = {}
         for status in EnrichmentStatus:
             result = await db.execute(
-                select(func.count(ContributorEnrichment.id))
-                .where(ContributorEnrichment.enrichment_status == status)
+                select(func.count(ContributorEnrichment.id)).where(
+                    ContributorEnrichment.enrichment_status == status
+                )
             )
             status_counts[status.value] = result.scalar() or 0
 
         # Count users with key contacts
         with_twitter = await db.execute(
-            select(func.count()).select_from(ContributorEnrichment)
+            select(func.count())
+            .select_from(ContributorEnrichment)
             .where(ContributorEnrichment.twitter_username.isnot(None))
         )
         with_linkedin = await db.execute(
-            select(func.count()).select_from(ContributorEnrichment)
+            select(func.count())
+            .select_from(ContributorEnrichment)
             .where(ContributorEnrichment.linkedin_url.isnot(None))
         )
         with_email = await db.execute(
-            select(func.count()).select_from(ContributorEnrichment)
+            select(func.count())
+            .select_from(ContributorEnrichment)
             .where(ContributorEnrichment.personal_email.isnot(None))
         )
 
@@ -586,9 +596,7 @@ async def _backfill_enrichment_async(
 
     async with create_worker_session_maker()() as db:
         # Get total count
-        total_result = await db.execute(
-            select(func.count(GlobalLeaderboard.user_id))
-        )
+        total_result = await db.execute(select(func.count(GlobalLeaderboard.user_id)))
         total_users = total_result.scalar() or 0
 
         if total_users == 0:

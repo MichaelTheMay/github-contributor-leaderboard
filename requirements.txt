@@ -1,0 +1,22 @@
+# Auto-generated from pyproject.toml
+# For development, use: pip install -e ".[dev]"
+
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+sqlalchemy>=2.0.25
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
+alembic>=1.13.1
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+redis>=5.0.1
+celery>=5.3.6
+httpx>=0.26.0
+google-cloud-bigquery>=3.14.1
+python-dotenv>=1.0.0
+structlog>=24.1.0
+tenacity>=8.2.3
+PyGithub>=2.1.1
+jinja2>=3.1.0
+aiofiles>=23.2.0
+websockets>=12.0

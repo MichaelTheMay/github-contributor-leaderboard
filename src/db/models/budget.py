@@ -13,6 +13,7 @@ from src.db.models.base import Base, TimestampMixin
 
 class CostCategory(str, Enum):
     """Categories for cost tracking."""
+
     BIGQUERY_SCAN = "bigquery_scan"
     BIGQUERY_STORAGE = "bigquery_storage"
     GITHUB_API = "github_api"
@@ -22,6 +23,7 @@ class CostCategory(str, Enum):
 
 class AuditAction(str, Enum):
     """Types of auditable actions."""
+
     JOB_STARTED = "job_started"
     JOB_COMPLETED = "job_completed"
     JOB_FAILED = "job_failed"
@@ -35,20 +37,15 @@ class AuditAction(str, Enum):
 
 class BudgetConfig(Base, TimestampMixin):
     """Budget configuration and limits."""
+
     __tablename__ = "budget_config"
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
     # Monthly budget limits (in USD)
-    monthly_budget_limit: Mapped[Decimal] = mapped_column(
-        Numeric(10, 4), default=Decimal("50.00")
-    )
-    daily_budget_limit: Mapped[Decimal] = mapped_column(
-        Numeric(10, 4), default=Decimal("10.00")
-    )
-    per_job_limit: Mapped[Decimal] = mapped_column(
-        Numeric(10, 4), default=Decimal("5.00")
-    )
+    monthly_budget_limit: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("50.00"))
+    daily_budget_limit: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("10.00"))
+    per_job_limit: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("5.00"))
 
     # Alert thresholds (percentage of budget)
     alert_threshold_warning: Mapped[int] = mapped_column(default=70)  # 70%
@@ -58,9 +55,7 @@ class BudgetConfig(Base, TimestampMixin):
     auto_pause_on_budget_exceeded: Mapped[bool] = mapped_column(default=True)
 
     # BigQuery pricing (per TB scanned, in USD)
-    bigquery_price_per_tb: Mapped[Decimal] = mapped_column(
-        Numeric(10, 4), default=Decimal("5.00")
-    )
+    bigquery_price_per_tb: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("5.00"))
 
     # Is this the active config
     is_active: Mapped[bool] = mapped_column(default=True)
@@ -68,6 +63,7 @@ class BudgetConfig(Base, TimestampMixin):
 
 class CostRecord(Base, TimestampMixin):
     """Individual cost records for tracking expenses."""
+
     __tablename__ = "cost_records"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -117,6 +113,7 @@ class CostRecord(Base, TimestampMixin):
 
 class DailyCostSummary(Base, TimestampMixin):
     """Daily aggregated cost summary for quick lookups."""
+
     __tablename__ = "daily_cost_summaries"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -137,13 +134,12 @@ class DailyCostSummary(Base, TimestampMixin):
     jobs_failed: Mapped[int] = mapped_column(default=0)
     repositories_scraped: Mapped[int] = mapped_column(default=0)
 
-    __table_args__ = (
-        Index("idx_daily_cost_date", "date"),
-    )
+    __table_args__ = (Index("idx_daily_cost_date", "date"),)
 
 
 class AuditLog(Base):
     """Comprehensive audit log for all system actions."""
+
     __tablename__ = "audit_logs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
