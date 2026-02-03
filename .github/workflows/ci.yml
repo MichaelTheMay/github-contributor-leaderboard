@@ -79,6 +79,11 @@ jobs:
           pip install pytest pytest-asyncio pytest-cov httpx
 
       - name: Run unit tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379/0
+          BIGQUERY_PROJECT: test-project
+          GITHUB_TOKEN: test-token
         run: |
           pytest tests/unit/ -v --cov=src --cov-report=xml --cov-report=term-missing
 
