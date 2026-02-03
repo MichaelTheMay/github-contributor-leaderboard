@@ -1,0 +1,358 @@
+name: Scheduled Pipeline
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC (adjusts for BigQuery off-peak pricing)
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Pipeline action to run'
+        required: true
+        default: 'full-pipeline'
+        type: choice
+        options:
+          - full-pipeline
+          - refresh-stale
+          - recalculate-leaderboards
+          - scrape-specific
+      repository:
+        description: 'Repository to scrape (owner/name) - only for scrape-specific'
+        required: false
+        type: string
+      dry_run:
+        description: 'Dry run (log only, no actual changes)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  pipeline:
+    name: Run Pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2 hour timeout for long-running scrapes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate secrets
+        run: |
+          echo "Checking required secrets..."
+          if [ -z "${{ secrets.DATABASE_URL }}" ]; then
+            echo "::error::DATABASE_URL secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.BIGQUERY_CREDENTIALS }}" ]; then
+            echo "::error::BIGQUERY_CREDENTIALS secret is not set"
+            exit 1
+          fi
+          echo "All required secrets are present"
+
+      - name: Setup BigQuery credentials
+        run: |
+          echo '${{ secrets.BIGQUERY_CREDENTIALS }}' > /tmp/bigquery-sa.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/bigquery-sa.json" >> $GITHUB_ENV
+
+      - name: Check budget before running
+        id: budget_check
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BIGQUERY_PROJECT: ${{ secrets.BIGQUERY_PROJECT }}
+        run: |
+          python -c "
+          import asyncio
+          from src.db.database import get_async_session
+          from src.services.budget_service import BudgetService
+
+          async def check_budget():
+              async with get_async_session() as db:
+                  budget_service = BudgetService(db)
+                  status = await budget_service._check_budget_status(0, await budget_service.get_active_config())
+                  print(f'Daily spent: \${status[\"daily_spent_usd\"]:.4f}')
+                  print(f'Monthly spent: \${status[\"monthly_spent_usd\"]:.4f}')
+                  print(f'Can proceed: {status[\"can_proceed\"]}')
+                  if not status['can_proceed']:
+                      print('::warning::Budget limit reached, pipeline will skip expensive operations')
+                  return status['can_proceed']
+
+          result = asyncio.run(check_budget())
+          print(f'::set-output name=can_proceed::{str(result).lower()}')
+          "
+
+      - name: Run Full Pipeline
+        if: ${{ github.event.inputs.action == 'full-pipeline' || github.event_name == 'schedule' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          BIGQUERY_PROJECT: ${{ secrets.BIGQUERY_PROJECT }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          echo "=== Starting Full Pipeline ==="
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Dry run: $DRY_RUN"
+          echo ""
+
+          python << 'PIPELINE_SCRIPT'
+          import asyncio
+          import os
+          import sys
+          import structlog
+          from datetime import datetime, timedelta
+
+          # Configure logging
+          structlog.configure(
+              processors=[
+                  structlog.stdlib.add_log_level,
+                  structlog.stdlib.PositionalArgumentsFormatter(),
+                  structlog.processors.TimeStamper(fmt="ISO"),
+                  structlog.processors.StackInfoRenderer(),
+                  structlog.processors.format_exc_info,
+                  structlog.dev.ConsoleRenderer(colors=False)
+              ],
+              wrapper_class=structlog.stdlib.BoundLogger,
+              context_class=dict,
+              logger_factory=structlog.PrintLoggerFactory(),
+          )
+
+          logger = structlog.get_logger()
+
+          async def run_pipeline():
+              from sqlalchemy import select, func
+              from src.db.database import get_async_session
+              from src.db.models import Repository, RepositoryLeaderboard, ScrapeJob, ScrapeWindow
+              from src.db.models.repository import RepositoryStatus
+              from src.db.models.job import JobStatus, JobType
+              from src.services.budget_service import BudgetService, AuditAction
+
+              dry_run = os.environ.get('DRY_RUN', 'false').lower() == 'true'
+
+              async with get_async_session() as db:
+                  budget_service = BudgetService(db)
+
+                  logger.info("pipeline_started", dry_run=dry_run)
+
+                  # Log start
+                  await budget_service.log_audit(
+                      action=AuditAction.JOB_STARTED,
+                      category="scheduled_pipeline",
+                      description=f"Scheduled pipeline started (dry_run={dry_run})",
+                      extra_data={"source": "github_actions", "dry_run": dry_run}
+                  )
+
+                  # Step 1: Find stale repositories
+                  cutoff = datetime.utcnow() - timedelta(hours=24)
+                  stale_result = await db.execute(
+                      select(Repository).where(
+                          (Repository.last_scraped_at < cutoff) |
+                          (Repository.last_scraped_at.is_(None)),
+                          Repository.status != RepositoryStatus.SCRAPING,
+                      )
+                  )
+                  stale_repos = stale_result.scalars().all()
+                  logger.info("stale_repos_found", count=len(stale_repos))
+
+                  # Step 2: Check budget and queue scrapes
+                  config = await budget_service.get_active_config()
+                  status = await budget_service._check_budget_status(0, config)
+
+                  if not status['can_proceed']:
+                      logger.warning("budget_exceeded",
+                          daily_pct=status['daily_percentage'],
+                          monthly_pct=status['monthly_percentage']
+                      )
+                      print("::warning::Skipping scrapes due to budget limits")
+                  else:
+                      for repo in stale_repos[:5]:  # Limit to 5 repos per run
+                          logger.info("queueing_scrape",
+                              repository=f"{repo.owner}/{repo.name}",
+                              last_scraped=repo.last_scraped_at
+                          )
+
+                          if not dry_run:
+                              # Create job
+                              job = ScrapeJob(
+                                  repository_id=repo.id,
+                                  job_type=JobType.INCREMENTAL,
+                              )
+                              db.add(job)
+                              await db.flush()
+
+                              # Queue via Celery (if available)
+                              try:
+                                  from src.workers.tasks.scrape_tasks import scrape_repository
+                                  scrape_repository.delay(repo.id, job.id)
+                                  logger.info("scrape_queued", job_id=job.id)
+                              except Exception as e:
+                                  logger.warning("celery_unavailable", error=str(e))
+                                  # Direct async scrape as fallback
+                                  from src.workers.tasks.scrape_tasks import _scrape_repository_async
+                                  try:
+                                      result = await _scrape_repository_async(None, repo.id, job.id)
+                                      logger.info("scrape_completed", result=result)
+                                  except Exception as scrape_error:
+                                      logger.error("scrape_failed", error=str(scrape_error))
+
+                  # Step 3: Recalculate global leaderboard
+                  logger.info("recalculating_global_leaderboard")
+                  if not dry_run:
+                      try:
+                          from src.workers.tasks.scrape_tasks import _recalculate_global_leaderboard_async
+                          result = await _recalculate_global_leaderboard_async()
+                          logger.info("global_leaderboard_recalculated",
+                              contributors=result.get('total_contributors', 0)
+                          )
+                      except Exception as e:
+                          logger.error("global_recalc_failed", error=str(e))
+
+                  # Step 4: Log completion
+                  await budget_service.log_audit(
+                      action=AuditAction.JOB_COMPLETED,
+                      category="scheduled_pipeline",
+                      description=f"Scheduled pipeline completed",
+                      extra_data={
+                          "stale_repos_found": len(stale_repos),
+                          "dry_run": dry_run,
+                      }
+                  )
+
+                  await db.commit()
+                  logger.info("pipeline_completed")
+
+                  # Print summary for GitHub Actions
+                  print(f"\n{'='*50}")
+                  print("PIPELINE SUMMARY")
+                  print(f"{'='*50}")
+                  print(f"Stale repositories found: {len(stale_repos)}")
+                  print(f"Budget status: {'OK' if status['can_proceed'] else 'EXCEEDED'}")
+                  print(f"Daily spend: ${status['daily_spent_usd']:.4f} / ${status['daily_limit_usd']:.2f}")
+                  print(f"Monthly spend: ${status['monthly_spent_usd']:.4f} / ${status['monthly_limit_usd']:.2f}")
+                  print(f"{'='*50}")
+
+          if __name__ == "__main__":
+              try:
+                  asyncio.run(run_pipeline())
+              except Exception as e:
+                  print(f"::error::Pipeline failed: {e}")
+                  sys.exit(1)
+          PIPELINE_SCRIPT
+
+      - name: Refresh Stale Only
+        if: ${{ github.event.inputs.action == 'refresh-stale' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          BIGQUERY_PROJECT: ${{ secrets.BIGQUERY_PROJECT }}
+        run: |
+          python -c "
+          import asyncio
+          from src.workers.tasks.scrape_tasks import _refresh_stale_repositories_async
+          result = asyncio.run(_refresh_stale_repositories_async())
+          print(f'Queued {result.get(\"repositories_queued\", 0)} repositories')
+          "
+
+      - name: Recalculate Leaderboards Only
+        if: ${{ github.event.inputs.action == 'recalculate-leaderboards' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python -c "
+          import asyncio
+          from src.workers.tasks.scrape_tasks import _recalculate_global_leaderboard_async
+          result = asyncio.run(_recalculate_global_leaderboard_async())
+          print(f'Recalculated leaderboard with {result.get(\"total_contributors\", 0)} contributors')
+          "
+
+      - name: Scrape Specific Repository
+        if: ${{ github.event.inputs.action == 'scrape-specific' && github.event.inputs.repository != '' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          BIGQUERY_PROJECT: ${{ secrets.BIGQUERY_PROJECT }}
+          REPOSITORY: ${{ github.event.inputs.repository }}
+        run: |
+          echo "Scraping repository: $REPOSITORY"
+          python -c "
+          import asyncio
+          import os
+
+          async def scrape():
+              repo = os.environ['REPOSITORY']
+              owner, name = repo.split('/')
+
+              from src.workers.tasks.scrape_tasks import _trigger_repository_scrape_async
+              result = await _trigger_repository_scrape_async(None, owner, name)
+              print(f'Result: {result}')
+
+          asyncio.run(scrape())
+          "
+
+      - name: Cleanup credentials
+        if: always()
+        run: |
+          rm -f /tmp/bigquery-sa.json
+
+      - name: Report status
+        if: always()
+        run: |
+          echo "Pipeline completed at $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Exit code: ${{ job.status }}"
+
+  notify:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: pipeline
+    if: failure()
+    steps:
+      - name: Create Issue on Failure
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `Scheduled Pipeline Failed - ${new Date().toISOString().split('T')[0]}`;
+            const body = `
+            ## Pipeline Failure Report
+
+            **Workflow Run:** [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            **Triggered By:** ${context.eventName}
+            **Time:** ${new Date().toISOString()}
+
+            Please investigate the logs and fix any issues.
+
+            ### Quick Actions
+            - [ ] Check BigQuery quota
+            - [ ] Verify database connectivity
+            - [ ] Review error logs
+            - [ ] Check budget limits
+            `;
+
+            // Check if similar issue exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'pipeline-failure'
+            });
+
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['pipeline-failure', 'automated']
+              });
+            }
