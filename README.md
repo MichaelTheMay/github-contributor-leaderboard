@@ -124,22 +124,38 @@ Create a Personal Access Token with these scopes:
    - BigQuery Job User
 4. Download the service account JSON key
 
-## Monitoring Dashboard
+## Dashboards
+
+### Monitoring Dashboard (`/dashboard`)
 
 The monitoring dashboard provides real-time visibility into the system:
-
-### Features
 
 - **Live Statistics**: Active jobs, repository count, processed events, errors
 - **Job Monitoring**: View all scrape jobs with status, progress, and timing
 - **Repository List**: All tracked repositories with status indicators
+- **Global Leaderboard**: View top contributors across all repositories
 - **Live Logs**: WebSocket-powered real-time log streaming with filtering
-- **Error Tracking**: Recent errors with details for debugging
 
-### Accessing the Dashboard
+### Pipeline Control (`/dashboard/pipeline`)
 
-- **URL**: http://localhost:8000/dashboard
-- **Root redirect**: http://localhost:8000 redirects to the dashboard
+The pipeline control center lets you manage the entire data pipeline:
+
+- **Add Repositories**: Track new GitHub repositories
+- **Scrape Data**: Fetch contribution data from BigQuery
+- **Calculate Scores**: Apply scoring formula to all entries
+- **Aggregate Global**: Build master leaderboard from all repos
+- **Enrichment**: Discover contributor social media profiles
+- **Budget Tracking**: Monitor BigQuery usage and costs
+
+### Quick Start Workflow
+
+1. Navigate to **http://localhost:8000/dashboard/pipeline**
+2. Add a repository (e.g., `pytorch/pytorch`)
+3. Click **Scrape** to fetch historical data from BigQuery
+4. Click **Aggregate Global** to build the master leaderboard
+5. Go to **Contributor Enrichment** section
+6. Click **Top 0.1%** to enrich top contributors
+7. View enriched data in the interactive table
 
 ### Log Levels
 
@@ -304,14 +320,48 @@ Used for:
 
 **Rate Limit**: 5,000 requests/hour with authentication
 
-## Enrichment Pipeline
+## Pipeline Control Dashboard
 
-The enrichment system discovers contributor contact information from multiple sources:
+The Pipeline Control dashboard at `/dashboard/pipeline` provides a unified interface for managing the entire data pipeline:
 
-1. **GitHub Profile**: Email, Twitter, company, website
-2. **Profile README**: Parse badges and links
-3. **Commit Emails**: Extract from git commit metadata
-4. **External APIs** (optional): Clearbit, Hunter.io, Apollo
+### Contributor Enrichment
+
+Enrich contributor profiles with social media and contact information:
+
+- **Single User Enrichment**: Enrich a specific GitHub user by username
+- **Batch Enrichment**: Enrich top N contributors by global score
+- **Quick Actions**: One-click buttons for top 0.1%, 0.5%, 1%, 5%
+- **Progress Tracking**: Real-time stats showing enrichment coverage
+
+### Supported Platforms
+
+The enrichment system extracts data from 30+ platforms:
+
+| Category | Platforms |
+|----------|-----------|
+| Social Media | Twitter/X, LinkedIn, Bluesky, Mastodon, Threads, Instagram, Facebook |
+| Developer | GitHub Sponsors, GitLab, npm, PyPI, CodePen, Dribbble, Behance |
+| Video/Streaming | YouTube, Twitch, TikTok |
+| Community | Reddit, Hacker News, Stack Overflow, Discord, Telegram, Keybase |
+| Professional | Personal websites, Substack, Medium, dev.to, Kaggle |
+
+### Data Sources
+
+1. **GitHub Profile API**: Email, Twitter, company, website, bio, location
+2. **Profile README**: Badges, links, shields.io badges, social icons
+3. **Fallback APIs** (optional): LinkedIn enrichment via Proxycurl
+
+### Enrichment Statistics
+
+The dashboard shows real-time coverage statistics:
+- Total users enriched vs. unenriched
+- Breakdown by status (complete, partial, pending, failed)
+- Count of each social platform found
+- Last 24h activity metrics
+
+### Exporting Data
+
+Export enriched contributor data to CSV with all social columns for external analysis.
 
 ## License
 
