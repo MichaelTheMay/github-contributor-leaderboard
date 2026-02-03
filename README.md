@@ -96,6 +96,27 @@ cd docker
 docker-compose up -d
 ```
 
+### Cloud Deployment (GitHub Actions)
+
+For fully automated operation via GitHub Actions:
+
+1. **Set up a cloud PostgreSQL database** (see [docs/cloud-database-setup.md](docs/cloud-database-setup.md))
+2. **Configure GitHub Secrets**:
+   - `DATABASE_URL` - Cloud PostgreSQL connection string
+   - `BIGQUERY_PROJECT` - Google Cloud project ID
+   - `BIGQUERY_CREDENTIALS` - Service account JSON content
+   - `GH_PAT` - GitHub Personal Access Token
+
+The scheduled pipeline runs daily at 2 AM UTC and automatically:
+- Refreshes stale repositories
+- Recalculates leaderboards
+- Enriches top 50 unenriched contributors
+
+Manual actions available via **Actions > Scheduled Pipeline > Run workflow**:
+- `full-pipeline` - Complete daily pipeline
+- `enrich-top-contributors` - Enrich N users on demand
+- `enrichment-backfill` - Backfill top N% of contributors
+
 ## Configuration
 
 ### Environment Variables
