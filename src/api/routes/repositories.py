@@ -120,6 +120,7 @@ async def scrape_repository(
 ) -> dict:
     """Trigger a full BigQuery scrape for repository data (requires Celery worker)."""
     from sqlalchemy import select
+
     from src.db.models.job import JobStatus, ScrapeJob
     from src.db.models.repository import RepositoryStatus
     from src.workers.tasks.scrape_tasks import trigger_repository_scrape
@@ -152,7 +153,9 @@ async def scrape_repository(
             "message": "Repository already scraped. Use force=true to re-scrape.",
             "repository": f"{owner}/{name}",
             "status": "already_completed",
-            "last_scraped": repository.last_scraped_at.isoformat() if repository.last_scraped_at else None,
+            "last_scraped": repository.last_scraped_at.isoformat()
+            if repository.last_scraped_at
+            else None,
         }
 
     # Trigger async scrape via Celery

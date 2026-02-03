@@ -54,13 +54,13 @@ class RepositoryLeaderboard(Base, TimestampMixin):
     def total_events(self) -> int:
         """Total number of contribution events (sum of all event counts)."""
         return (
-            (self.commit_count or 0) +
-            (self.pr_opened_count or 0) +
-            (self.pr_merged_count or 0) +
-            (self.pr_reviewed_count or 0) +
-            (self.issues_opened_count or 0) +
-            (self.issues_closed_count or 0) +
-            (self.comments_count or 0)
+            (self.commit_count or 0)
+            + (self.pr_opened_count or 0)
+            + (self.pr_merged_count or 0)
+            + (self.pr_reviewed_count or 0)
+            + (self.issues_opened_count or 0)
+            + (self.issues_closed_count or 0)
+            + (self.comments_count or 0)
         )
 
     def __repr__(self) -> str:

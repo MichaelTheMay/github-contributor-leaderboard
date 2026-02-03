@@ -1,32 +1,88 @@
-"""Async GitHub enricher for FastAPI routes.
+"""Synchronous GitHub enricher for Celery workers.
 
-This module provides an asynchronous version of GitHubEnricher for use in
-FastAPI routes with asyncpg.
+This module provides a synchronous version of GitHubEnricher for use in Celery
+workers, which run in separate processes without an asyncio event loop.
 """
 
 import contextlib
 from datetime import UTC, datetime
 
+import httpx
 import structlog
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
+from tenacity import retry, stop_after_attempt, wait_exponential
 
+from src.core.config import settings
 from src.db.models.enrichment import ContributorEnrichment, EnrichmentStatus
 from src.db.models.user import GitHubUser
 from src.enrichment.readme_parser import ParsedSocialLinks, ReadmeParser
-from src.services.github_service import GitHubService
 
 logger = structlog.get_logger()
 
 
-class GitHubEnricher:
-    """Enricher that extracts data from GitHub profiles and READMEs."""
+class GitHubServiceSync:
+    """Synchronous GitHub API client for Celery workers."""
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self) -> None:
+        self.base_url = settings.github_api_base_url
+        self.headers = {
+            "Authorization": f"token {settings.github_token}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+        self.timeout = httpx.Timeout(30.0)
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+    )
+    def get_user(self, username: str) -> dict | None:
+        """Fetch user details from GitHub API."""
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.get(
+                f"{self.base_url}/users/{username}",
+                headers=self.headers,
+            )
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+    )
+    def get_user_readme(self, username: str) -> str | None:
+        """Fetch user profile README content."""
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.get(
+                f"{self.base_url}/repos/{username}/{username}/readme",
+                headers={**self.headers, "Accept": "application/vnd.github.raw"},
+            )
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.text
+
+    def get_rate_limit(self) -> dict:
+        """Check current rate limit status."""
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.get(
+                f"{self.base_url}/rate_limit",
+                headers=self.headers,
+            )
+            response.raise_for_status()
+            return response.json()
+
+
+class GitHubEnricherSync:
+    """Synchronous enricher for use in Celery workers."""
+
+    def __init__(self, db: Session) -> None:
         self.db = db
-        self.github = GitHubService()
+        self.github = GitHubServiceSync()
         self.readme_parser = ReadmeParser()
 
-    async def enrich_user(self, user: GitHubUser) -> ContributorEnrichment:
+    def enrich_user(self, user: GitHubUser) -> ContributorEnrichment:
         """
         Enrich a user's profile with GitHub data.
 
@@ -36,13 +92,18 @@ class GitHubEnricher:
         3. Parse README for social links
         4. Update enrichment record
         """
-        logger.info("Enriching user from GitHub", username=user.username)
+        logger.info("Enriching user from GitHub (sync)", username=user.username)
 
         # Get or create enrichment record
-        enrichment = user.enrichment
+        enrichment = (
+            self.db.query(ContributorEnrichment)
+            .filter(ContributorEnrichment.user_id == user.id)
+            .first()
+        )
         if not enrichment:
             enrichment = ContributorEnrichment(user_id=user.id)
             self.db.add(enrichment)
+            self.db.flush()
 
         # Track enrichment attempts
         enrichment.enrichment_attempts = (enrichment.enrichment_attempts or 0) + 1
@@ -52,13 +113,13 @@ class GitHubEnricher:
 
         try:
             # Fetch GitHub profile
-            profile = await self.github.get_user(user.username)
+            profile = self.github.get_user(user.username)
             if profile:
                 sources_found.append("github_profile")
                 self._update_from_profile(user, enrichment, profile)
 
             # Fetch and parse profile README
-            readme = await self.github.get_user_readme(user.username)
+            readme = self.github.get_user_readme(user.username)
             if readme:
                 sources_found.append("profile_readme")
                 parsed = self.readme_parser.parse(readme)
@@ -79,7 +140,7 @@ class GitHubEnricher:
                 enrichment.enrichment_status = EnrichmentStatus.PENDING
 
             logger.info(
-                "GitHub enrichment completed",
+                "GitHub enrichment completed (sync)",
                 username=user.username,
                 sources=sources_found,
                 fields_found=enrichment.count_sources_found(),
@@ -87,7 +148,7 @@ class GitHubEnricher:
 
         except Exception as e:
             logger.error(
-                "GitHub enrichment failed",
+                "GitHub enrichment failed (sync)",
                 username=user.username,
                 error=str(e),
             )

@@ -14,7 +14,6 @@ from src.db.models.budget import (
     BudgetConfig,
     CostCategory,
     CostRecord,
-    DailyCostSummary,
 )
 from src.db.models.job import ScrapeJob
 from src.db.models.repository import Repository
@@ -27,10 +26,10 @@ DEFAULT_PRICE_PER_TB = Decimal("5.00")  # $5 per TB scanned
 
 # Repository size estimation (rough bytes per year of activity)
 REPO_SIZE_ESTIMATES = {
-    "small": 50 * 1024 * 1024,        # 50 MB - small repos
-    "medium": 200 * 1024 * 1024,      # 200 MB - medium repos
-    "large": 500 * 1024 * 1024,       # 500 MB - large repos
-    "huge": 2 * 1024 * 1024 * 1024,   # 2 GB - very active repos
+    "small": 50 * 1024 * 1024,  # 50 MB - small repos
+    "medium": 200 * 1024 * 1024,  # 200 MB - medium repos
+    "large": 500 * 1024 * 1024,  # 500 MB - large repos
+    "huge": 2 * 1024 * 1024 * 1024,  # 2 GB - very active repos
 }
 
 
@@ -46,9 +45,7 @@ class BudgetService:
 
     async def get_active_config(self) -> BudgetConfig:
         """Get or create the active budget configuration."""
-        result = await self.db.execute(
-            select(BudgetConfig).where(BudgetConfig.is_active == True)
-        )
+        result = await self.db.execute(select(BudgetConfig).where(BudgetConfig.is_active.is_(True)))
         config = result.scalar_one_or_none()
 
         if not config:
@@ -92,9 +89,7 @@ class BudgetService:
         config = await self.get_active_config()
 
         # Get repository info
-        result = await self.db.execute(
-            select(Repository).where(Repository.id == repository_id)
-        )
+        result = await self.db.execute(select(Repository).where(Repository.id == repository_id))
         repository = result.scalar_one_or_none()
 
         if not repository:
@@ -200,14 +195,28 @@ class BudgetService:
         exceeds_per_job = estimated_cost > config.per_job_limit
 
         # Calculate percentages
-        daily_pct = (float(daily_projected) / float(config.daily_budget_limit)) * 100 if config.daily_budget_limit else 0
-        monthly_pct = (float(monthly_projected) / float(config.monthly_budget_limit)) * 100 if config.monthly_budget_limit else 0
+        daily_pct = (
+            (float(daily_projected) / float(config.daily_budget_limit)) * 100
+            if config.daily_budget_limit
+            else 0
+        )
+        monthly_pct = (
+            (float(monthly_projected) / float(config.monthly_budget_limit)) * 100
+            if config.monthly_budget_limit
+            else 0
+        )
 
         # Determine warning level
         warning_level = "normal"
-        if daily_pct >= config.alert_threshold_critical or monthly_pct >= config.alert_threshold_critical:
+        if (
+            daily_pct >= config.alert_threshold_critical
+            or monthly_pct >= config.alert_threshold_critical
+        ):
             warning_level = "critical"
-        elif daily_pct >= config.alert_threshold_warning or monthly_pct >= config.alert_threshold_warning:
+        elif (
+            daily_pct >= config.alert_threshold_warning
+            or monthly_pct >= config.alert_threshold_warning
+        ):
             warning_level = "warning"
 
         can_proceed = not (exceeds_daily or exceeds_monthly or exceeds_per_job)
@@ -251,9 +260,7 @@ class BudgetService:
         actual_cost = self._calculate_cost(bytes_billed, config.bigquery_price_per_tb)
 
         # Get job and repository info
-        job_result = await self.db.execute(
-            select(ScrapeJob).where(ScrapeJob.id == job_id)
-        )
+        job_result = await self.db.execute(select(ScrapeJob).where(ScrapeJob.id == job_id))
         job = job_result.scalar_one_or_none()
 
         # Create cost record
@@ -304,9 +311,7 @@ class BudgetService:
         estimated_cost: Decimal,
     ) -> None:
         """Record estimated cost when job is created."""
-        job_result = await self.db.execute(
-            select(ScrapeJob).where(ScrapeJob.id == job_id)
-        )
+        job_result = await self.db.execute(select(ScrapeJob).where(ScrapeJob.id == job_id))
         job = job_result.scalar_one_or_none()
         if job:
             job.estimated_cost = estimated_cost
@@ -413,15 +418,21 @@ class BudgetService:
         )
         recent_jobs = []
         for job in recent_result.scalars().all():
-            recent_jobs.append({
-                "job_id": job.id,
-                "repository_id": job.repository_id,
-                "estimated_cost_usd": float(job.estimated_cost),
-                "actual_cost_usd": float(job.actual_cost),
-                "bytes_processed": job.bytes_processed,
-                "accuracy_pct": round((float(job.actual_cost) / float(job.estimated_cost) * 100), 1) if job.estimated_cost else 0,
-                "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-            })
+            recent_jobs.append(
+                {
+                    "job_id": job.id,
+                    "repository_id": job.repository_id,
+                    "estimated_cost_usd": float(job.estimated_cost),
+                    "actual_cost_usd": float(job.actual_cost),
+                    "bytes_processed": job.bytes_processed,
+                    "accuracy_pct": round(
+                        (float(job.actual_cost) / float(job.estimated_cost) * 100), 1
+                    )
+                    if job.estimated_cost
+                    else 0,
+                    "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+                }
+            )
 
         return {
             "period_days": days,
@@ -527,22 +538,26 @@ class BudgetService:
 
         logs = []
         for entry in result.scalars().all():
-            logs.append({
-                "id": entry.id,
-                "timestamp": entry.timestamp.isoformat(),
-                "action": entry.action,
-                "category": entry.category,
-                "description": entry.description,
-                "job_id": entry.job_id,
-                "repository_id": entry.repository_id,
-                "estimated_cost_usd": float(entry.estimated_cost) if entry.estimated_cost else None,
-                "actual_cost_usd": float(entry.actual_cost) if entry.actual_cost else None,
-                "bytes_processed": entry.bytes_processed,
-                "success": entry.success,
-                "error_message": entry.error_message,
-                "source": entry.source,
-                "extra_data": entry.extra_data,
-            })
+            logs.append(
+                {
+                    "id": entry.id,
+                    "timestamp": entry.timestamp.isoformat(),
+                    "action": entry.action,
+                    "category": entry.category,
+                    "description": entry.description,
+                    "job_id": entry.job_id,
+                    "repository_id": entry.repository_id,
+                    "estimated_cost_usd": float(entry.estimated_cost)
+                    if entry.estimated_cost
+                    else None,
+                    "actual_cost_usd": float(entry.actual_cost) if entry.actual_cost else None,
+                    "bytes_processed": entry.bytes_processed,
+                    "success": entry.success,
+                    "error_message": entry.error_message,
+                    "source": entry.source,
+                    "extra_data": entry.extra_data,
+                }
+            )
 
         return logs, total
 

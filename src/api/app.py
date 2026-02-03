@@ -1,9 +1,8 @@
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
 
 from src.api.routes import router as api_router
 from src.api.routes.dashboard import router as dashboard_router

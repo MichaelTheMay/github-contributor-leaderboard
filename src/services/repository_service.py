@@ -117,9 +117,7 @@ class RepositoryService:
         status: RepositoryStatus,
     ) -> None:
         """Update repository status."""
-        result = await self.db.execute(
-            select(Repository).where(Repository.id == repository_id)
-        )
+        result = await self.db.execute(select(Repository).where(Repository.id == repository_id))
         repository = result.scalar_one_or_none()
         if repository:
             repository.status = status

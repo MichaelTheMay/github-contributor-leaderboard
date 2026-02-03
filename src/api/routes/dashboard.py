@@ -1,5 +1,4 @@
 import asyncio
-import json
 from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -103,10 +102,10 @@ async def websocket_logs(websocket: WebSocket) -> None:
         while True:
             try:
                 # Wait for any message (ping/pong or commands)
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=30)
-            except asyncio.TimeoutError:
-                # Send periodic stats update
-                pass
+                await asyncio.wait_for(websocket.receive_text(), timeout=30)
+            except TimeoutError:
+                # Timeout is expected - send periodic stats update
+                continue
 
     except WebSocketDisconnect:
         pass
@@ -119,9 +118,7 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)) -> dict[str, A
     """Get current dashboard statistics."""
     # Count active jobs
     active_jobs_result = await db.execute(
-        select(func.count(ScrapeJob.id)).where(
-            ScrapeJob.status == JobStatus.RUNNING
-        )
+        select(func.count(ScrapeJob.id)).where(ScrapeJob.status == JobStatus.RUNNING)
     )
     active_jobs = active_jobs_result.scalar() or 0
 
@@ -198,8 +195,10 @@ async def log_debug(message: str) -> None:
 # PIPELINE CONTROL ENDPOINTS
 # ============================================================================
 
+
 class PipelineSettings(BaseModel):
     """Settings for pipeline automation."""
+
     auto_refresh_stale_repos: bool = True
     auto_recalc_global_after_scrape: bool = True
     auto_recalc_global_interval: bool = True
@@ -209,6 +208,7 @@ class PipelineSettings(BaseModel):
 
 class ScrapeConfig(BaseModel):
     """Configuration for a scrape operation."""
+
     lookback_days: int = 730
     force: bool = False
 
@@ -259,15 +259,19 @@ async def get_pipeline_status(db: AsyncSession = Depends(get_db)) -> dict[str, A
 
     # Get list of pending/failed repos that can be scraped
     scrapable_result = await db.execute(
-        select(Repository).where(
-            Repository.status.in_([RepositoryStatus.PENDING, RepositoryStatus.FAILED, RepositoryStatus.COMPLETED])
-        ).order_by(Repository.last_scraped_at.asc().nullsfirst())
+        select(Repository)
+        .where(
+            Repository.status.in_(
+                [RepositoryStatus.PENDING, RepositoryStatus.FAILED, RepositoryStatus.COMPLETED]
+            )
+        )
+        .order_by(Repository.last_scraped_at.asc().nullsfirst())
     )
     scrapable_repos = [
         {
             "id": r.id,
             "full_name": f"{r.owner}/{r.name}",
-            "status": r.status.value if hasattr(r.status, 'value') else r.status,
+            "status": r.status.value if hasattr(r.status, "value") else r.status,
             "last_scraped": r.last_scraped_at.isoformat() if r.last_scraped_at else None,
             "stars": r.stars,
         }
@@ -310,8 +314,12 @@ async def get_pipeline_status(db: AsyncSession = Depends(get_db)) -> dict[str, A
             "has_new_data_to_aggregate": has_new_data,
         },
         "messages": _generate_status_messages(
-            total_repos, completed_repos, repo_lb_count, global_lb_count,
-            stale_count, job_stats.get("running", 0)
+            total_repos,
+            completed_repos,
+            repo_lb_count,
+            global_lb_count,
+            stale_count,
+            job_stats.get("running", 0),
         ),
     }
 
@@ -328,33 +336,43 @@ def _generate_status_messages(
     messages = []
 
     if total_repos == 0:
-        messages.append({
-            "type": "info",
-            "text": "No repositories tracked yet. Add a repository to get started.",
-        })
+        messages.append(
+            {
+                "type": "info",
+                "text": "No repositories tracked yet. Add a repository to get started.",
+            }
+        )
     elif completed_repos == 0:
-        messages.append({
-            "type": "warning",
-            "text": "No repositories have been scraped yet. Trigger a scrape to populate leaderboards.",
-        })
+        messages.append(
+            {
+                "type": "warning",
+                "text": "No repositories have been scraped yet. Trigger a scrape to populate leaderboards.",
+            }
+        )
 
     if running_jobs > 0:
-        messages.append({
-            "type": "info",
-            "text": f"{running_jobs} job(s) currently running. Wait for completion before starting new scrapes.",
-        })
+        messages.append(
+            {
+                "type": "info",
+                "text": f"{running_jobs} job(s) currently running. Wait for completion before starting new scrapes.",
+            }
+        )
 
     if stale_count > 0:
-        messages.append({
-            "type": "warning",
-            "text": f"{stale_count} repository(ies) have stale data and should be refreshed.",
-        })
+        messages.append(
+            {
+                "type": "warning",
+                "text": f"{stale_count} repository(ies) have stale data and should be refreshed.",
+            }
+        )
 
     if repo_lb_count > 0 and global_lb_count == 0:
-        messages.append({
-            "type": "warning",
-            "text": "Repository leaderboards exist but global leaderboard is empty. Trigger global recalculation.",
-        })
+        messages.append(
+            {
+                "type": "warning",
+                "text": "Repository leaderboards exist but global leaderboard is empty. Trigger global recalculation.",
+            }
+        )
 
     return messages
 
@@ -409,7 +427,7 @@ async def trigger_scrape(
     if pending_result.scalar_one_or_none() and not config.force:
         raise HTTPException(
             status_code=409,
-            detail="A job is already queued or running for this repository. Use force=true to override."
+            detail="A job is already queued or running for this repository. Use force=true to override.",
         )
 
     # Create job
@@ -424,7 +442,10 @@ async def trigger_scrape(
     task = scrape_repository.delay(repository.id, job.id)
     await db.commit()
 
-    await broadcaster.log("info", f"Scrape triggered for {owner}/{name} (job {job.id}, lookback {config.lookback_days} days)")
+    await broadcaster.log(
+        "info",
+        f"Scrape triggered for {owner}/{name} (job {job.id}, lookback {config.lookback_days} days)",
+    )
 
     return {
         "status": "queued",
@@ -482,7 +503,9 @@ async def trigger_scrape_all_pending(
 
     await db.commit()
 
-    await broadcaster.log("info", f"Batch scrape triggered: {len(queued)} queued, {len(skipped)} skipped")
+    await broadcaster.log(
+        "info", f"Batch scrape triggered: {len(queued)} queued, {len(skipped)} skipped"
+    )
 
     return {
         "status": "queued",
@@ -521,7 +544,7 @@ async def trigger_recalculate_repo_leaderboard(
     if lb_count == 0:
         raise HTTPException(
             status_code=400,
-            detail=f"No leaderboard data for {owner}/{name}. Scrape the repository first."
+            detail=f"No leaderboard data for {owner}/{name}. Scrape the repository first.",
         )
 
     # Recalculate rankings in place
@@ -537,7 +560,9 @@ async def trigger_recalculate_repo_leaderboard(
 
     await db.commit()
 
-    await broadcaster.log("info", f"Repository leaderboard recalculated for {owner}/{name} ({lb_count} entries)")
+    await broadcaster.log(
+        "info", f"Repository leaderboard recalculated for {owner}/{name} ({lb_count} entries)"
+    )
 
     return {
         "status": "completed",
@@ -560,7 +585,7 @@ async def trigger_recalculate_global_leaderboard(
     if lb_count == 0:
         raise HTTPException(
             status_code=400,
-            detail="No repository leaderboard data exists. Scrape repositories first."
+            detail="No repository leaderboard data exists. Scrape repositories first.",
         )
 
     # Trigger async task
@@ -587,10 +612,7 @@ async def trigger_recalculate_all_scores(
     entries = result.scalars().all()
 
     if not entries:
-        raise HTTPException(
-            status_code=400,
-            detail="No leaderboard entries to recalculate."
-        )
+        raise HTTPException(status_code=400, detail="No leaderboard entries to recalculate.")
 
     await broadcaster.log("info", f"Starting score recalculation for {len(entries)} entries...")
 
@@ -606,8 +628,9 @@ async def trigger_recalculate_all_scores(
         score += Decimal(str(entry.comments_count)) * Decimal("3")
 
         # Line bonus (capped at 500)
-        line_bonus = (Decimal(str(entry.lines_added)) * Decimal("0.01")) + \
-                     (Decimal(str(entry.lines_deleted)) * Decimal("0.005"))
+        line_bonus = (Decimal(str(entry.lines_added)) * Decimal("0.01")) + (
+            Decimal(str(entry.lines_deleted)) * Decimal("0.005")
+        )
         line_bonus = min(line_bonus, Decimal("500"))
         score += line_bonus
 
@@ -616,9 +639,7 @@ async def trigger_recalculate_all_scores(
     await db.commit()
 
     # Now recalculate rankings per repository
-    repo_ids_result = await db.execute(
-        select(RepositoryLeaderboard.repository_id).distinct()
-    )
+    repo_ids_result = await db.execute(select(RepositoryLeaderboard.repository_id).distinct())
     repo_ids = [r[0] for r in repo_ids_result.all()]
 
     for repo_id in repo_ids:
@@ -637,6 +658,7 @@ async def trigger_recalculate_all_scores(
 
     # Trigger global leaderboard recalc
     from src.workers.tasks.scrape_tasks import recalculate_global_leaderboard
+
     task = recalculate_global_leaderboard.delay()
 
     return {
@@ -739,7 +761,9 @@ async def cleanup_stale_jobs(
 
     await db.commit()
 
-    await broadcaster.log("warning", f"Cleanup: {len(cleaned)} jobs failed, {len(reset_repos)} repos reset")
+    await broadcaster.log(
+        "warning", f"Cleanup: {len(cleaned)} jobs failed, {len(reset_repos)} repos reset"
+    )
 
     return {
         "status": "completed",
@@ -753,8 +777,10 @@ async def cleanup_stale_jobs(
 # BUDGET & COST TRACKING ENDPOINTS
 # ============================================================================
 
+
 class BudgetConfigUpdate(BaseModel):
     """Budget configuration update model."""
+
     monthly_budget_limit: float | None = None
     daily_budget_limit: float | None = None
     per_job_limit: float | None = None
@@ -768,6 +794,7 @@ class BudgetConfigUpdate(BaseModel):
 async def get_budget_config(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Get current budget configuration."""
     from src.services.budget_service import BudgetService
+
     service = BudgetService(db)
     config = await service.get_active_config()
 
@@ -789,6 +816,7 @@ async def update_budget_config(
 ) -> dict[str, Any]:
     """Update budget configuration."""
     from decimal import Decimal
+
     from src.services.budget_service import BudgetService
 
     service = BudgetService(db)
@@ -820,6 +848,7 @@ async def update_budget_config(
 async def get_budget_status(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Get current budget status and spending."""
     from decimal import Decimal
+
     from src.services.budget_service import BudgetService
 
     service = BudgetService(db)
@@ -920,4 +949,349 @@ async def get_audit_logs(
         "total": total,
         "page": page,
         "page_size": page_size,
+    }
+
+
+# ============================================================================
+# ENRICHMENT ENDPOINTS
+# ============================================================================
+
+
+@router.get("/enrichment/status")
+async def get_enrichment_status(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Get comprehensive enrichment statistics."""
+    from datetime import timedelta
+
+    from src.db.models.enrichment import ContributorEnrichment, EnrichmentStatus
+
+    # Count by enrichment status
+    status_counts = {}
+    for status in EnrichmentStatus:
+        result = await db.execute(
+            select(func.count(ContributorEnrichment.id)).where(
+                ContributorEnrichment.enrichment_status == status
+            )
+        )
+        status_counts[status.value] = result.scalar() or 0
+
+    # Count total users
+    total_users_result = await db.execute(select(func.count(GitHubUser.id)))
+    total_users = total_users_result.scalar() or 0
+
+    # Count users with enrichment records
+    enriched_users_result = await db.execute(select(func.count(ContributorEnrichment.id)))
+    enriched_users = enriched_users_result.scalar() or 0
+
+    # Count enriched in last 24 hours
+    yesterday = datetime.utcnow() - timedelta(hours=24)
+    recent_result = await db.execute(
+        select(func.count(ContributorEnrichment.id)).where(
+            ContributorEnrichment.last_enriched_at >= yesterday
+        )
+    )
+    enriched_last_24h = recent_result.scalar() or 0
+
+    # Count by source found (how many users have each contact type)
+    with_twitter = await db.execute(
+        select(func.count())
+        .select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.twitter_username.isnot(None))
+    )
+    with_linkedin = await db.execute(
+        select(func.count())
+        .select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.linkedin_url.isnot(None))
+    )
+    with_email = await db.execute(
+        select(func.count())
+        .select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.personal_email.isnot(None))
+    )
+    with_website = await db.execute(
+        select(func.count())
+        .select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.personal_website.isnot(None))
+    )
+    with_bluesky = await db.execute(
+        select(func.count())
+        .select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.bluesky_handle.isnot(None))
+    )
+    with_mastodon = await db.execute(
+        select(func.count())
+        .select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.mastodon_handle.isnot(None))
+    )
+    with_discord = await db.execute(
+        select(func.count())
+        .select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.discord_username.isnot(None))
+    )
+    with_youtube = await db.execute(
+        select(func.count())
+        .select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.youtube_channel.isnot(None))
+    )
+
+    return {
+        "total_users": total_users,
+        "enriched_users": enriched_users,
+        "unenriched_users": total_users - enriched_users,
+        "enrichment_status": status_counts,
+        "enriched_last_24h": enriched_last_24h,
+        "sources_found": {
+            "twitter": with_twitter.scalar() or 0,
+            "linkedin": with_linkedin.scalar() or 0,
+            "email": with_email.scalar() or 0,
+            "website": with_website.scalar() or 0,
+            "bluesky": with_bluesky.scalar() or 0,
+            "mastodon": with_mastodon.scalar() or 0,
+            "discord": with_discord.scalar() or 0,
+            "youtube": with_youtube.scalar() or 0,
+        },
+        "coverage_percentage": round(
+            (enriched_users / total_users * 100) if total_users > 0 else 0, 2
+        ),
+    }
+
+
+@router.post("/pipeline/enrich-batch")
+async def trigger_batch_enrichment(
+    limit: int = Query(default=10, ge=1, le=10000),
+    min_score: float | None = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Trigger batch enrichment of top contributors.
+
+    Args:
+        limit: Maximum number of contributors to enrich (1-10000)
+        min_score: Optional minimum score threshold
+        force_refresh: If True, re-enrich even recently enriched users
+    """
+    from src.workers.tasks.enrichment_tasks import batch_enrich_top_contributors
+
+    task = batch_enrich_top_contributors.delay(
+        limit=limit,
+        min_score=min_score,
+        force_refresh=force_refresh,
+    )
+
+    await broadcaster.log(
+        "info",
+        f"Batch enrichment triggered for top {limit} contributors"
+        + (f" (min_score={min_score})" if min_score else "")
+        + (" [force refresh]" if force_refresh else ""),
+    )
+
+    return {
+        "status": "queued",
+        "task_id": task.id,
+        "limit": limit,
+        "min_score": min_score,
+        "force_refresh": force_refresh,
+    }
+
+
+@router.post("/pipeline/enrich-user/{username}")
+async def trigger_user_enrichment(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Trigger enrichment for a specific user by username."""
+    from src.workers.tasks.enrichment_tasks import enrich_contributor
+
+    # Find user
+    result = await db.execute(select(GitHubUser).where(GitHubUser.username == username))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User {username} not found")
+
+    # Queue enrichment task
+    task = enrich_contributor.delay(user.id)
+
+    await broadcaster.log("info", f"Enrichment triggered for user: {username}")
+
+    return {
+        "status": "queued",
+        "task_id": task.id,
+        "username": username,
+        "user_id": user.id,
+    }
+
+
+@router.get("/enrichment/recent")
+async def get_recent_enrichments(
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Get recently enriched contributors."""
+    from src.db.models.enrichment import ContributorEnrichment
+
+    result = await db.execute(
+        select(ContributorEnrichment, GitHubUser)
+        .join(GitHubUser, ContributorEnrichment.user_id == GitHubUser.id)
+        .where(ContributorEnrichment.last_enriched_at.isnot(None))
+        .order_by(ContributorEnrichment.last_enriched_at.desc())
+        .limit(limit)
+    )
+    rows = result.all()
+
+    return [
+        {
+            "username": user.username,
+            "user_id": user.id,
+            "enrichment_status": enrichment.enrichment_status.value,
+            "last_enriched_at": enrichment.last_enriched_at.isoformat()
+            if enrichment.last_enriched_at
+            else None,
+            "sources_found": enrichment.enrichment_sources or {},
+            "twitter": enrichment.twitter_username,
+            "linkedin": enrichment.linkedin_url,
+            "email": enrichment.personal_email,
+            "website": enrichment.personal_website,
+        }
+        for enrichment, user in rows
+    ]
+
+
+@router.get("/enrichment/failed")
+async def get_failed_enrichments(
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Get contributors with failed enrichment."""
+    from src.db.models.enrichment import ContributorEnrichment, EnrichmentStatus
+
+    result = await db.execute(
+        select(ContributorEnrichment, GitHubUser)
+        .join(GitHubUser, ContributorEnrichment.user_id == GitHubUser.id)
+        .where(ContributorEnrichment.enrichment_status == EnrichmentStatus.FAILED)
+        .order_by(ContributorEnrichment.updated_at.desc())
+        .limit(limit)
+    )
+    rows = result.all()
+
+    return [
+        {
+            "username": user.username,
+            "user_id": user.id,
+            "last_error": enrichment.last_error,
+            "enrichment_attempts": enrichment.enrichment_attempts,
+            "updated_at": enrichment.updated_at.isoformat() if enrichment.updated_at else None,
+        }
+        for enrichment, user in rows
+    ]
+
+
+@router.get("/enrichment/users")
+async def get_enriched_users(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    status: str = Query(
+        default="", description="Filter by status: complete, partial, pending, failed"
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get users with their enrichment data for the dashboard table.
+
+    Returns users joined with global leaderboard scores and enrichment data.
+    """
+    from src.db.models.enrichment import ContributorEnrichment, EnrichmentStatus
+
+    # Build query - get users with global scores, joined with enrichment
+    query = (
+        select(GitHubUser, GlobalLeaderboard, ContributorEnrichment)
+        .outerjoin(GlobalLeaderboard, GitHubUser.id == GlobalLeaderboard.user_id)
+        .outerjoin(ContributorEnrichment, GitHubUser.id == ContributorEnrichment.user_id)
+    )
+
+    # Filter by enrichment status if specified
+    if status:
+        try:
+            status_enum = EnrichmentStatus(status)
+            query = query.where(ContributorEnrichment.enrichment_status == status_enum)
+        except ValueError:
+            pass  # Invalid status, ignore filter
+
+    # Order by global score desc, then username
+    query = (
+        query.order_by(
+            GlobalLeaderboard.total_score.desc().nullslast(),
+            GitHubUser.username.asc(),
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    users = []
+    for user, global_lb, enrichment in rows:
+        user_data = {
+            "id": user.id,
+            "username": user.username,
+            "avatar_url": user.avatar_url,
+            "profile_url": user.profile_url,
+            "followers": user.followers,
+            "global_score": float(global_lb.total_score) if global_lb else 0,
+            "global_rank": global_lb.global_rank if global_lb else None,
+        }
+
+        if enrichment:
+            status_val = enrichment.enrichment_status
+            if hasattr(status_val, "value"):
+                status_val = status_val.value
+            user_data["enrichment"] = {
+                "status": status_val or "pending",
+                "last_enriched_at": enrichment.last_enriched_at.isoformat()
+                if enrichment.last_enriched_at
+                else None,
+                "github_followers": enrichment.github_followers,
+                "twitter_username": enrichment.twitter_username,
+                "linkedin_url": enrichment.linkedin_url,
+                "personal_email": enrichment.personal_email,
+                "personal_website": enrichment.personal_website,
+                "youtube_channel": enrichment.youtube_channel,
+                "discord_username": enrichment.discord_username,
+                "mastodon_handle": enrichment.mastodon_handle,
+                "bluesky_handle": enrichment.bluesky_handle,
+                "threads_username": enrichment.threads_username,
+                "instagram_username": enrichment.instagram_username,
+                "reddit_username": enrichment.reddit_username,
+                "hackernews_username": enrichment.hackernews_username,
+                "stackoverflow_url": enrichment.stackoverflow_url,
+                "telegram_username": enrichment.telegram_username,
+                "github_bio": enrichment.github_bio,
+                "github_company": enrichment.github_company,
+                "github_location": enrichment.github_location,
+            }
+        else:
+            user_data["enrichment"] = None
+
+        users.append(user_data)
+
+    # Get total count for pagination
+    count_query = select(func.count(GitHubUser.id))
+    if status:
+        try:
+            status_enum = EnrichmentStatus(status)
+            count_query = (
+                select(func.count(GitHubUser.id))
+                .outerjoin(ContributorEnrichment, GitHubUser.id == ContributorEnrichment.user_id)
+                .where(ContributorEnrichment.enrichment_status == status_enum)
+            )
+        except ValueError:
+            pass
+
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+
+    return {
+        "users": users,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }

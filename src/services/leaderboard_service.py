@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,7 +5,6 @@ from sqlalchemy.orm import joinedload
 
 from src.db.models.leaderboard import GlobalLeaderboard, RepositoryLeaderboard
 from src.db.models.repository import Repository
-from src.db.models.user import GitHubUser
 
 logger = structlog.get_logger()
 

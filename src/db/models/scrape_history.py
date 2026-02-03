@@ -12,6 +12,7 @@ class ScrapeWindow(Base, TimestampMixin):
     This enables incremental scraping by tracking what time periods have been
     scraped, avoiding expensive full re-scrapes and enabling deduplication.
     """
+
     __tablename__ = "scrape_windows"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -47,8 +48,10 @@ class ScrapeWindow(Base, TimestampMixin):
     __table_args__ = (
         Index("idx_scrape_windows_repo_dates", "repository_id", "data_end_date"),
         UniqueConstraint(
-            "repository_id", "data_start_date", "data_end_date",
-            name="uq_scrape_windows_repo_date_range"
+            "repository_id",
+            "data_start_date",
+            "data_end_date",
+            name="uq_scrape_windows_repo_date_range",
         ),
     )
 

@@ -12,6 +12,7 @@ dependencies = [
     "uvicorn[standard]>=0.27.0",
     "sqlalchemy>=2.0.25",
     "asyncpg>=0.29.0",
+    "psycopg2-binary>=2.9.9",  # Sync PostgreSQL driver for Celery workers
     "alembic>=1.13.1",
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
@@ -49,7 +50,10 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
-ignore = ["E501"]
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "B008",   # Function call in default argument - standard FastAPI pattern for Depends()
+]
 
 [tool.mypy]
 python_version = "3.11"

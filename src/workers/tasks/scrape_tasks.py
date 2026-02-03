@@ -4,10 +4,9 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 import structlog
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.config import settings
 from src.db.database import create_worker_session_maker
 from src.db.models.contribution import ContributionEvent, EventType
 from src.db.models.job import JobStatus, JobType, ScrapeJob
@@ -20,6 +19,33 @@ from src.services.bigquery_service import BigQueryService
 from src.workers.celery_app import celery_app
 
 logger = structlog.get_logger()
+
+# Bot account patterns to filter out
+BOT_PATTERNS = [
+    "[bot]",
+    "-bot",
+    "dependabot",
+    "github-actions",
+    "renovate",
+    "greenkeeper",
+    "snyk-bot",
+    "codecov",
+    "coveralls",
+    "semantic-release",
+    "release-drafter",
+    "allcontributors",
+    "imgbot",
+    "stale",
+]
+
+
+def is_bot_account(username: str) -> bool:
+    """Check if a username appears to be a bot account."""
+    if not username:
+        return True
+    username_lower = username.lower()
+    return any(pattern in username_lower for pattern in BOT_PATTERNS)
+
 
 # Windows requires ProactorEventLoop for asyncpg
 if sys.platform == "win32":
@@ -47,15 +73,18 @@ def run_async(coro):
 async def _determine_scrape_window(
     db: AsyncSession,
     repository: Repository,
-    job_type: JobType,
+    job_type: JobType | str,
 ) -> tuple[datetime, datetime]:
     """Determine what date range to scrape (avoiding duplicates).
 
     For incremental scrapes, starts from last scraped date minus 1 day overlap.
     For full scrapes, goes back 2 years.
     """
+    # Normalize job_type to string for comparison
+    job_type_str = job_type.value if hasattr(job_type, "value") else str(job_type)
+
     # For full scrapes, always go back 2 years
-    if job_type == JobType.FULL_SCRAPE:
+    if job_type_str == "full_scrape":
         start_date = datetime.utcnow() - timedelta(days=730)
         end_date = datetime.utcnow()
         return start_date, end_date
@@ -108,31 +137,32 @@ async def _store_raw_events(
     db: AsyncSession,
     repository_id: int,
     events: list[dict],
-) -> tuple[int, int, set[int]]:
+) -> tuple[int, int, int, set[int]]:
     """Store raw events with deduplication.
 
     Returns:
-        Tuple of (events_stored, events_skipped, unique_user_ids)
+        Tuple of (events_stored, events_skipped, bots_filtered, unique_user_ids)
     """
     events_stored = 0
     events_skipped = 0
+    bots_filtered = 0
     unique_user_ids: set[int] = set()
 
     for event in events:
         # Check if event already exists (deduplication)
         result = await db.execute(
-            select(ContributionEvent.id).where(
-                ContributionEvent.event_id == event["event_id"]
-            )
+            select(ContributionEvent.id).where(ContributionEvent.event_id == event["event_id"])
         )
         if result.scalar_one_or_none():
             events_skipped += 1
             continue
 
-        # Get or create user
-        user = await _get_or_create_user(
-            db, event["user_id"], event["username"]
-        )
+        # Get or create user (returns None for bot accounts)
+        user = await _get_or_create_user(db, event["user_id"], event["username"])
+        if user is None:
+            bots_filtered += 1
+            continue
+
         if user.id is None:
             await db.flush()
 
@@ -158,7 +188,7 @@ async def _store_raw_events(
         db.add(contribution_event)
         events_stored += 1
 
-    return events_stored, events_skipped, unique_user_ids
+    return events_stored, events_skipped, bots_filtered, unique_user_ids
 
 
 @celery_app.task(bind=True, max_retries=3)
@@ -175,14 +205,10 @@ async def _scrape_repository_async(task, repository_id: int, job_id: int) -> dic
 
     async with create_worker_session_maker()() as db:
         # Get repository and job
-        repo_result = await db.execute(
-            select(Repository).where(Repository.id == repository_id)
-        )
+        repo_result = await db.execute(select(Repository).where(Repository.id == repository_id))
         repository = repo_result.scalar_one_or_none()
 
-        job_result = await db.execute(
-            select(ScrapeJob).where(ScrapeJob.id == job_id)
-        )
+        job_result = await db.execute(select(ScrapeJob).where(ScrapeJob.id == job_id))
         job = job_result.scalar_one_or_none()
 
         if not repository or not job:
@@ -190,7 +216,8 @@ async def _scrape_repository_async(task, repository_id: int, job_id: int) -> dic
             return {"status": "failed", "error": "Repository or job not found"}
 
         # Import budget service for cost tracking
-        from src.services.budget_service import BudgetService, AuditAction
+        from src.services.budget_service import AuditAction, BudgetService
+
         budget_service = BudgetService(db)
 
         # Log job start
@@ -212,16 +239,16 @@ async def _scrape_repository_async(task, repository_id: int, job_id: int) -> dic
             await db.commit()
 
             # Determine scrape window (incremental vs full)
-            scrape_start, scrape_end = await _determine_scrape_window(
-                db, repository, job.job_type
-            )
+            scrape_start, scrape_end = await _determine_scrape_window(db, repository, job.job_type)
 
             logger.info(
                 "Determined scrape window",
                 repository=f"{repository.owner}/{repository.name}",
                 start_date=scrape_start.isoformat(),
                 end_date=scrape_end.isoformat(),
-                job_type=job.job_type.value,
+                job_type=job.job_type.value
+                if hasattr(job.job_type, "value")
+                else str(job.job_type),
             )
 
             # Fetch data from BigQuery
@@ -242,7 +269,8 @@ async def _scrape_repository_async(task, repository_id: int, job_id: int) -> dic
             bytes_billed = bq_stats.bytes_billed if bq_stats else 0
 
             events_processed = 0
-            users_created = 0
+            users_processed = 0
+            bots_filtered = 0
 
             # Get scoring weights
             weights = await _get_scoring_weights(db)
@@ -250,35 +278,44 @@ async def _scrape_repository_async(task, repository_id: int, job_id: int) -> dic
             batch_size = 100
             for i, stat in enumerate(stats):
                 try:
-                    # Ensure user exists
+                    # Ensure user exists (returns None for bot accounts)
                     user = await _get_or_create_user(db, stat["user_id"], stat["username"])
+
+                    if user is None:
+                        # Bot account - skip
+                        bots_filtered += 1
+                        continue
+
                     if user.id is None:
                         await db.flush()
-                    users_created += 1
+                    users_processed += 1
 
                     # Calculate score for this user in this repo
                     score = _calculate_user_score(stat, weights)
 
                     # Create or update leaderboard entry
-                    await _upsert_leaderboard_entry(
-                        db, repository.id, user.id, stat, score
-                    )
+                    await _upsert_leaderboard_entry(db, repository.id, user.id, stat, score)
 
                     events_processed += (
-                        stat["commit_events"] +
-                        stat["prs_opened"] +
-                        stat["prs_merged"] +
-                        stat["prs_reviewed"] +
-                        stat["issues_opened"] +
-                        stat["issues_closed"] +
-                        stat["comments"] +
-                        stat["releases"]
+                        stat["commit_events"]
+                        + stat["prs_opened"]
+                        + stat["prs_merged"]
+                        + stat["prs_reviewed"]
+                        + stat["issues_opened"]
+                        + stat["issues_closed"]
+                        + stat["comments"]
+                        + stat["releases"]
                     )
 
                     # Commit in batches to avoid large transactions
                     if (i + 1) % batch_size == 0:
                         await db.commit()
-                        logger.info("Batch committed", processed=i + 1, total=len(stats))
+                        logger.info(
+                            "Batch committed",
+                            processed=i + 1,
+                            total=len(stats),
+                            bots_filtered=bots_filtered,
+                        )
 
                 except Exception as e:
                     logger.warning(
@@ -303,7 +340,7 @@ async def _scrape_repository_async(task, repository_id: int, job_id: int) -> dic
                 data_start_date=scrape_start,
                 data_end_date=scrape_end,
                 events_fetched=events_processed,
-                contributors_found=users_created,
+                contributors_found=users_processed,
                 bytes_processed=bytes_processed,
                 bytes_billed=bytes_billed,
             )
@@ -336,7 +373,8 @@ async def _scrape_repository_async(task, repository_id: int, job_id: int) -> dic
                 duration_seconds=duration_seconds,
                 metadata={
                     "repository": repo_full_name,
-                    "users_processed": users_created,
+                    "users_processed": users_processed,
+                    "bots_filtered": bots_filtered,
                     "events_processed": events_processed,
                     "cache_hit": bq_stats.cache_hit if bq_stats else False,
                 },
@@ -346,14 +384,15 @@ async def _scrape_repository_async(task, repository_id: int, job_id: int) -> dic
             await budget_service.log_audit(
                 action=AuditAction.JOB_COMPLETED,
                 category="scrape",
-                description=f"Completed scraping {repo_full_name}: {users_created} users, {events_processed} events",
+                description=f"Completed scraping {repo_full_name}: {users_processed} users ({bots_filtered} bots filtered), {events_processed} events",
                 job_id=job_id,
                 repository_id=repository_id,
                 actual_cost=cost_record.actual_cost,
                 bytes_processed=bytes_processed,
                 extra_data={
                     "duration_seconds": duration_seconds,
-                    "users_processed": users_created,
+                    "users_processed": users_processed,
+                    "bots_filtered": bots_filtered,
                     "events_processed": events_processed,
                 },
             )
@@ -362,7 +401,8 @@ async def _scrape_repository_async(task, repository_id: int, job_id: int) -> dic
                 "Repository scrape completed",
                 repository=repo_full_name,
                 events_processed=events_processed,
-                users=users_created,
+                users_processed=users_processed,
+                bots_filtered=bots_filtered,
                 bytes_billed=bytes_billed,
                 actual_cost=float(cost_record.actual_cost),
                 scrape_window=f"{scrape_start.date()} to {scrape_end.date()}",
@@ -375,7 +415,8 @@ async def _scrape_repository_async(task, repository_id: int, job_id: int) -> dic
                 "status": "completed",
                 "repository_id": repository_id,
                 "events_processed": events_processed,
-                "users_processed": users_created,
+                "users_processed": users_processed,
+                "bots_filtered": bots_filtered,
                 "bytes_processed": bytes_processed,
                 "bytes_billed": bytes_billed,
                 "actual_cost_usd": float(cost_record.actual_cost),
@@ -410,7 +451,7 @@ async def _scrape_repository_async(task, repository_id: int, job_id: int) -> dic
                 error_message=str(exc),
             )
 
-            raise task.retry(exc=exc, countdown=60 * (task.request.retries + 1))
+            raise task.retry(exc=exc, countdown=60 * (task.request.retries + 1)) from exc
 
 
 async def _get_scoring_weights(db: AsyncSession) -> dict[str, Decimal]:
@@ -424,36 +465,72 @@ async def _get_or_create_user(
     db: AsyncSession,
     github_id: int,
     username: str,
-) -> GitHubUser:
-    """Get or create a GitHub user."""
-    from sqlalchemy import or_
+) -> GitHubUser | None:
+    """Get or create a GitHub user.
 
-    # Check by github_id OR username (both are unique)
-    result = await db.execute(
-        select(GitHubUser).where(
-            or_(
-                GitHubUser.github_id == github_id,
-                GitHubUser.username == username,
-            )
-        )
-    )
+    Returns None if the user is a bot account that should be filtered.
+    Uses github_id as the primary identifier since usernames can change.
+    """
+    # Filter out bot accounts
+    if is_bot_account(username):
+        return None
+
+    # First, try to find by github_id (primary identifier - never changes)
+    result = await db.execute(select(GitHubUser).where(GitHubUser.github_id == github_id))
     user = result.scalar_one_or_none()
 
-    if not user:
-        user = GitHubUser(
-            github_id=github_id,
-            username=username,
-            profile_url=f"https://github.com/{username}",
-        )
-        db.add(user)
-    elif user.github_id != github_id:
-        # Username exists but with different github_id - update it
-        user.github_id = github_id
-    elif user.username != username:
-        # github_id exists but username changed - update it
-        user.username = username
-        user.profile_url = f"https://github.com/{username}"
+    if user:
+        # User exists by github_id - update username if changed
+        if user.username != username:
+            # Check if new username conflicts with another user
+            conflict_result = await db.execute(
+                select(GitHubUser).where(
+                    GitHubUser.username == username,
+                    GitHubUser.github_id != github_id,
+                )
+            )
+            conflicting_user = conflict_result.scalar_one_or_none()
 
+            if conflicting_user:
+                # Another user has this username - likely stale data
+                # Mark the old record with a disambiguated username
+                conflicting_user.username = f"{username}_old_{conflicting_user.github_id}"
+                conflicting_user.profile_url = (
+                    f"https://github.com/{username}_old_{conflicting_user.github_id}"
+                )
+                logger.warning(
+                    "Username conflict resolved",
+                    old_user_id=conflicting_user.github_id,
+                    new_username=conflicting_user.username,
+                )
+
+            user.username = username
+            user.profile_url = f"https://github.com/{username}"
+        return user
+
+    # No user found by github_id - check if username exists (rare case)
+    result = await db.execute(select(GitHubUser).where(GitHubUser.username == username))
+    existing_by_username = result.scalar_one_or_none()
+
+    if existing_by_username:
+        # Username exists with different github_id
+        # This means the github_id in our DB is outdated
+        existing_by_username.github_id = github_id
+        logger.info(
+            "Updated github_id for existing user",
+            username=username,
+            old_github_id=existing_by_username.github_id,
+            new_github_id=github_id,
+        )
+        return existing_by_username
+
+    # Create new user
+    user = GitHubUser(
+        github_id=github_id,
+        username=username,
+        profile_url=f"https://github.com/{username}",
+    )
+    db.add(user)
     return user
 
 
@@ -567,8 +644,7 @@ async def _refresh_stale_repositories_async() -> dict:
 
         result = await db.execute(
             select(Repository).where(
-                (Repository.last_scraped_at < cutoff) |
-                (Repository.last_scraped_at.is_(None)),
+                (Repository.last_scraped_at < cutoff) | (Repository.last_scraped_at.is_(None)),
                 Repository.status != RepositoryStatus.SCRAPING,
             )
         )
@@ -625,9 +701,7 @@ async def _recalculate_global_leaderboard_async() -> dict:
         aggregates = result.all()
 
         # Clear existing global leaderboard
-        await db.execute(
-            GlobalLeaderboard.__table__.delete()
-        )
+        await db.execute(GlobalLeaderboard.__table__.delete())
 
         # Insert new rankings
         for rank, agg in enumerate(aggregates, start=1):
@@ -708,9 +782,7 @@ async def _recalculate_leaderboard_from_events_async(repository_id: int) -> dict
 
     async with create_worker_session_maker()() as db:
         # Get repository
-        repo_result = await db.execute(
-            select(Repository).where(Repository.id == repository_id)
-        )
+        repo_result = await db.execute(select(Repository).where(Repository.id == repository_id))
         repository = repo_result.scalar_one_or_none()
 
         if not repository:
@@ -720,27 +792,27 @@ async def _recalculate_leaderboard_from_events_async(repository_id: int) -> dict
         result = await db.execute(
             select(
                 ContributionEvent.user_id,
-                func.count(ContributionEvent.id).filter(
-                    ContributionEvent.event_type == EventType.COMMIT
-                ).label("commits"),
-                func.count(ContributionEvent.id).filter(
-                    ContributionEvent.event_type == EventType.PR_OPENED
-                ).label("prs_opened"),
-                func.count(ContributionEvent.id).filter(
-                    ContributionEvent.event_type == EventType.PR_MERGED
-                ).label("prs_merged"),
-                func.count(ContributionEvent.id).filter(
-                    ContributionEvent.event_type == EventType.PR_REVIEWED
-                ).label("prs_reviewed"),
-                func.count(ContributionEvent.id).filter(
-                    ContributionEvent.event_type == EventType.ISSUE_OPENED
-                ).label("issues_opened"),
-                func.count(ContributionEvent.id).filter(
-                    ContributionEvent.event_type == EventType.ISSUE_CLOSED
-                ).label("issues_closed"),
-                func.count(ContributionEvent.id).filter(
-                    ContributionEvent.event_type == EventType.COMMENT
-                ).label("comments"),
+                func.count(ContributionEvent.id)
+                .filter(ContributionEvent.event_type == EventType.COMMIT)
+                .label("commits"),
+                func.count(ContributionEvent.id)
+                .filter(ContributionEvent.event_type == EventType.PR_OPENED)
+                .label("prs_opened"),
+                func.count(ContributionEvent.id)
+                .filter(ContributionEvent.event_type == EventType.PR_MERGED)
+                .label("prs_merged"),
+                func.count(ContributionEvent.id)
+                .filter(ContributionEvent.event_type == EventType.PR_REVIEWED)
+                .label("prs_reviewed"),
+                func.count(ContributionEvent.id)
+                .filter(ContributionEvent.event_type == EventType.ISSUE_OPENED)
+                .label("issues_opened"),
+                func.count(ContributionEvent.id)
+                .filter(ContributionEvent.event_type == EventType.ISSUE_CLOSED)
+                .label("issues_closed"),
+                func.count(ContributionEvent.id)
+                .filter(ContributionEvent.event_type == EventType.COMMENT)
+                .label("comments"),
                 func.sum(ContributionEvent.lines_added).label("lines_added"),
                 func.sum(ContributionEvent.lines_deleted).label("lines_deleted"),
                 func.min(ContributionEvent.event_timestamp).label("first_contribution"),
@@ -779,9 +851,7 @@ async def _recalculate_leaderboard_from_events_async(repository_id: int) -> dict
             score = _calculate_user_score(stat, weights)
 
             # Update or create leaderboard entry
-            await _upsert_leaderboard_entry(
-                db, repository_id, agg.user_id, stat, score
-            )
+            await _upsert_leaderboard_entry(db, repository_id, agg.user_id, stat, score)
             users_updated += 1
 
         # Update rankings
