@@ -371,6 +371,116 @@
         .audit-entry-time { color: #6e7681; }
         .audit-entry-desc { color: #8b949e; }
         .audit-entry-cost { color: #3fb950; font-weight: 500; }
+
+        /* Enrichment table styles */
+        .enrichment-table-container {
+            max-height: 500px;
+            overflow: auto;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+        }
+        .enrichment-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .enrichment-table th {
+            position: sticky;
+            top: 0;
+            background: #161b22;
+            padding: 10px 8px;
+            text-align: left;
+            font-weight: 600;
+            color: #f0f6fc;
+            border-bottom: 1px solid #30363d;
+            white-space: nowrap;
+        }
+        .enrichment-table td {
+            padding: 8px;
+            border-bottom: 1px solid #21262d;
+            color: #c9d1d9;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .enrichment-table tr:hover { background: #1c2128; }
+        .enrichment-table .user-cell {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .enrichment-table .user-avatar {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+        }
+        .enrichment-table .social-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            font-size: 10px;
+        }
+        .enrichment-table .social-found { color: #3fb950; }
+        .enrichment-table .social-missing { color: #484f58; }
+        .enrichment-table a { color: #58a6ff; text-decoration: none; }
+        .enrichment-table a:hover { text-decoration: underline; }
+        .status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .status-badge.complete { background: #23863533; color: #3fb950; }
+        .status-badge.partial { background: #d2992233; color: #d29922; }
+        .status-badge.pending { background: #8b949e33; color: #8b949e; }
+        .status-badge.failed { background: #f8514933; color: #f85149; }
+        .checkbox-cell { width: 30px; text-align: center; }
+        .enrichment-table input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+        .bulk-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            padding: 10px;
+            background: #0d1117;
+            border-radius: 6px;
+            margin-bottom: 12px;
+        }
+        .bulk-actions .selected-count {
+            font-size: 13px;
+            color: #8b949e;
+        }
+        .filter-bar {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        .tab-buttons {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 12px;
+        }
+        .tab-btn {
+            padding: 6px 14px;
+            border: 1px solid #30363d;
+            background: #0d1117;
+            color: #8b949e;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.15s;
+        }
+        .tab-btn:hover { background: #161b22; color: #c9d1d9; }
+        .tab-btn.active { background: #238636; border-color: #238636; color: #fff; }
     </style>
 </head>
 <body>
@@ -483,6 +593,230 @@
                 <div style="margin-top: 8px; font-size: 12px; color: #8b949e;">
                     Price: <span id="bqPricePerTB">$5.00</span>/TB
                 </div>
+            </div>
+        </div>
+
+        <!-- Enrichment Section -->
+        <div class="section-title" style="margin-top: 24px;">
+            <span>&#128100;</span> Contributor Enrichment
+        </div>
+
+        <div class="grid grid-4" style="margin-bottom: 16px;">
+            <div class="card">
+                <div class="stat-item" style="padding: 0;">
+                    <div class="stat-value" id="statEnriched">-</div>
+                    <div class="stat-label">Enriched Contributors</div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="stat-item" style="padding: 0;">
+                    <div class="stat-value success" id="statComplete">-</div>
+                    <div class="stat-label">Complete (3+ sources)</div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="stat-item" style="padding: 0;">
+                    <div class="stat-value warning" id="statPartial">-</div>
+                    <div class="stat-label">Partial (1-2 sources)</div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="stat-item" style="padding: 0;">
+                    <div class="stat-value error" id="statFailed">-</div>
+                    <div class="stat-label">Failed Enrichments</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-2" style="margin-bottom: 16px;">
+            <!-- Enrichment Controls -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title"><span class="icon">&#9881;</span> Enrichment Controls</span>
+                </div>
+
+                <!-- Single User Enrichment -->
+                <div class="pipeline-stage">
+                    <div class="pipeline-stage-header">
+                        <span class="pipeline-stage-title">Single User Enrichment</span>
+                    </div>
+                    <div class="pipeline-stage-desc">
+                        Enrich a single GitHub user by username. Uses GitHub API (profile + README).
+                    </div>
+                    <div class="pipeline-stage-actions">
+                        <div class="input-group">
+                            <input type="text" id="enrichUsername" placeholder="GitHub username" style="width: 180px;">
+                        </div>
+                        <button class="btn btn-primary" onclick="enrichSingleUser()">Enrich User</button>
+                    </div>
+                </div>
+
+                <!-- Batch Enrichment -->
+                <div class="pipeline-stage">
+                    <div class="pipeline-stage-header">
+                        <span class="pipeline-stage-title">Batch Enrichment</span>
+                    </div>
+                    <div class="pipeline-stage-desc">
+                        Enrich top contributors by global score. Prioritizes GitHub API (free/fast), expensive methods only as fallback.
+                    </div>
+                    <div class="pipeline-stage-actions">
+                        <div class="input-group">
+                            <label>Limit:</label>
+                            <input type="number" id="enrichBatchLimit" value="10" min="1" max="1000" style="width: 70px;">
+                        </div>
+                        <div class="input-group">
+                            <label>Min Score:</label>
+                            <input type="number" id="enrichMinScore" value="0" min="0" style="width: 70px;">
+                        </div>
+                        <button class="btn btn-primary" onclick="enrichBatch()">Enrich Batch</button>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="pipeline-stage">
+                    <div class="pipeline-stage-header">
+                        <span class="pipeline-stage-title">Quick Actions</span>
+                    </div>
+                    <div class="pipeline-stage-desc">
+                        Enrich top percentage of contributors by score ranking.
+                    </div>
+                    <div class="pipeline-stage-actions" style="flex-wrap: wrap;">
+                        <button class="btn" onclick="enrichTopPercent(0.1)">Top 0.1% (~82)</button>
+                        <button class="btn" onclick="enrichTopPercent(0.5)">Top 0.5% (~410)</button>
+                        <button class="btn" onclick="enrichTopPercent(1)">Top 1% (~821)</button>
+                        <button class="btn btn-warning" onclick="enrichTopPercent(5)">Top 5% (~4,105)</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sources Found Stats -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title"><span class="icon">&#128202;</span> Sources Found</span>
+                    <button class="btn btn-sm" onclick="refreshEnrichmentStats()">Refresh</button>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                    <div class="stat-item">
+                        <div class="stat-value" style="font-size: 20px;" id="statTwitter">-</div>
+                        <div class="stat-label">Twitter</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" style="font-size: 20px;" id="statLinkedIn">-</div>
+                        <div class="stat-label">LinkedIn</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" style="font-size: 20px;" id="statEmail">-</div>
+                        <div class="stat-label">Email</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" style="font-size: 20px;" id="statWebsite">-</div>
+                        <div class="stat-label">Website</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" style="font-size: 20px;" id="statYouTube">-</div>
+                        <div class="stat-label">YouTube</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" style="font-size: 20px;" id="statDiscord">-</div>
+                        <div class="stat-label">Discord</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" style="font-size: 20px;" id="statMastodon">-</div>
+                        <div class="stat-label">Mastodon</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" style="font-size: 20px;" id="statBluesky">-</div>
+                        <div class="stat-label">Bluesky</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" style="font-size: 20px;" id="statGitHub">-</div>
+                        <div class="stat-label">GH Followers</div>
+                    </div>
+                </div>
+                <div style="margin-top: 16px; padding: 12px; background: #0d1117; border-radius: 6px;">
+                    <div class="stat-label" style="margin-bottom: 8px;">Last 24h Activity</div>
+                    <div style="display: flex; gap: 20px;">
+                        <div>
+                            <span style="color: #f0f6fc; font-weight: 600;" id="statLast24h">-</span>
+                            <span style="color: #8b949e; font-size: 12px;">enriched</span>
+                        </div>
+                        <div>
+                            <span style="color: #f0f6fc; font-weight: 600;" id="statPending">-</span>
+                            <span style="color: #8b949e; font-size: 12px;">pending</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Enriched Users Table -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+                <span class="card-title"><span class="icon">&#128100;</span> Enriched Contributors</span>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-sm" onclick="exportEnrichmentCSV()">Export CSV</button>
+                    <button class="btn btn-sm" onclick="loadEnrichedUsers()">Refresh</button>
+                </div>
+            </div>
+
+            <div class="filter-bar">
+                <div class="tab-buttons">
+                    <button class="tab-btn active" onclick="filterEnrichmentStatus('all', this)">All</button>
+                    <button class="tab-btn" onclick="filterEnrichmentStatus('complete', this)">Complete</button>
+                    <button class="tab-btn" onclick="filterEnrichmentStatus('partial', this)">Partial</button>
+                    <button class="tab-btn" onclick="filterEnrichmentStatus('failed', this)">Failed</button>
+                </div>
+                <div class="input-group">
+                    <label>Search:</label>
+                    <input type="text" id="enrichmentSearch" placeholder="Username..." style="width: 150px;" oninput="filterEnrichmentTable()">
+                </div>
+                <div class="input-group">
+                    <label>Show:</label>
+                    <select id="enrichmentPageSize" onchange="loadEnrichedUsers()" style="width: 80px;">
+                        <option value="25">25</option>
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
+                        <option value="250">250</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="bulk-actions" id="bulkActions" style="display: none;">
+                <input type="checkbox" id="selectAll" onchange="toggleSelectAll()">
+                <span class="selected-count"><span id="selectedCount">0</span> selected</span>
+                <button class="btn btn-sm btn-primary" onclick="enrichSelected()">Enrich Selected</button>
+            </div>
+
+            <div class="enrichment-table-container">
+                <table class="enrichment-table" id="enrichmentTable">
+                    <thead>
+                        <tr>
+                            <th class="checkbox-cell"><input type="checkbox" id="headerCheckbox" onchange="toggleSelectAll()"></th>
+                            <th>User</th>
+                            <th>Status</th>
+                            <th>Score</th>
+                            <th>Followers</th>
+                            <th>Twitter</th>
+                            <th>LinkedIn</th>
+                            <th>Email</th>
+                            <th>Website</th>
+                            <th>YouTube</th>
+                            <th>Discord</th>
+                            <th>Mastodon</th>
+                            <th>Bluesky</th>
+                            <th>Threads</th>
+                            <th>Instagram</th>
+                            <th>Reddit</th>
+                            <th>HN</th>
+                            <th>SO</th>
+                            <th>Telegram</th>
+                            <th>Last Enriched</th>
+                        </tr>
+                    </thead>
+                    <tbody id="enrichmentTableBody">
+                        <tr><td colspan="20" style="text-align: center; padding: 40px; color: #8b949e;">Loading...</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
@@ -1234,6 +1568,358 @@
                 message: message,
                 timestamp: new Date().toISOString(),
             });
+        }
+
+        // ==================== ENRICHMENT FUNCTIONS ====================
+
+        let enrichmentData = [];
+        let enrichmentFilter = 'all';
+        let selectedUsers = new Set();
+        const TOTAL_CONTRIBUTORS = 82108; // From database count
+
+        // Initialize enrichment on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshEnrichmentStats();
+            loadEnrichedUsers();
+            setInterval(refreshEnrichmentStats, 30000);
+        });
+
+        async function refreshEnrichmentStats() {
+            try {
+                const response = await fetch('/dashboard/enrichment/status');
+                const data = await response.json();
+                updateEnrichmentStatsUI(data);
+            } catch (err) {
+                console.error('Failed to fetch enrichment stats:', err);
+            }
+        }
+
+        function updateEnrichmentStatsUI(data) {
+            // Status counts
+            const status = data.enrichment_status || {};
+            const total = (status.complete || 0) + (status.partial || 0) + (status.pending || 0) + (status.failed || 0);
+            document.getElementById('statEnriched').textContent = total.toLocaleString();
+            document.getElementById('statComplete').textContent = (status.complete || 0).toLocaleString();
+            document.getElementById('statPartial').textContent = (status.partial || 0).toLocaleString();
+            document.getElementById('statFailed').textContent = (status.failed || 0).toLocaleString();
+
+            // Sources found
+            const sources = data.sources_found || {};
+            document.getElementById('statTwitter').textContent = (sources.twitter || 0).toLocaleString();
+            document.getElementById('statLinkedIn').textContent = (sources.linkedin || 0).toLocaleString();
+            document.getElementById('statEmail').textContent = (sources.email || 0).toLocaleString();
+            document.getElementById('statWebsite').textContent = (sources.website || 0).toLocaleString();
+            document.getElementById('statYouTube').textContent = (sources.youtube || 0).toLocaleString();
+            document.getElementById('statDiscord').textContent = (sources.discord || 0).toLocaleString();
+            document.getElementById('statMastodon').textContent = (sources.mastodon || 0).toLocaleString();
+            document.getElementById('statBluesky').textContent = (sources.bluesky || 0).toLocaleString();
+            document.getElementById('statGitHub').textContent = (sources.github_followers || 0).toLocaleString();
+
+            // Activity
+            document.getElementById('statLast24h').textContent = (data.enriched_last_24h || 0).toLocaleString();
+            document.getElementById('statPending').textContent = ((data.total_users || 0) - total).toLocaleString();
+        }
+
+        async function loadEnrichedUsers() {
+            const limit = document.getElementById('enrichmentPageSize').value || 50;
+            try {
+                const response = await fetch(`/dashboard/enrichment/users?limit=${limit}&status=${enrichmentFilter !== 'all' ? enrichmentFilter : ''}`);
+                const data = await response.json();
+                enrichmentData = data.users || [];
+                renderEnrichmentTable();
+            } catch (err) {
+                console.error('Failed to load enriched users:', err);
+                document.getElementById('enrichmentTableBody').innerHTML =
+                    '<tr><td colspan="20" style="text-align: center; padding: 40px; color: #f85149;">Failed to load users</td></tr>';
+            }
+        }
+
+        function renderEnrichmentTable() {
+            const tbody = document.getElementById('enrichmentTableBody');
+            const search = document.getElementById('enrichmentSearch').value.toLowerCase();
+
+            let filtered = enrichmentData;
+            if (search) {
+                filtered = enrichmentData.filter(u => u.username.toLowerCase().includes(search));
+            }
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="20" style="text-align: center; padding: 40px; color: #8b949e;">No users found</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(user => {
+                const e = user.enrichment || {};
+                const isSelected = selectedUsers.has(user.username);
+                return `
+                <tr data-username="${user.username}">
+                    <td class="checkbox-cell">
+                        <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleUserSelection('${user.username}')">
+                    </td>
+                    <td>
+                        <div class="user-cell">
+                            ${user.avatar_url ? `<img src="${user.avatar_url}" class="user-avatar" alt="">` : ''}
+                            <a href="https://github.com/${user.username}" target="_blank">${user.username}</a>
+                        </div>
+                    </td>
+                    <td><span class="status-badge ${e.status || 'pending'}">${e.status || 'pending'}</span></td>
+                    <td>${(user.global_score || 0).toFixed(1)}</td>
+                    <td>${(e.github_followers || user.followers || 0).toLocaleString()}</td>
+                    <td>${socialCell(e.twitter_username, 'twitter.com')}</td>
+                    <td>${socialCell(e.linkedin_url, null, true)}</td>
+                    <td>${socialCell(e.personal_email, null, false, true)}</td>
+                    <td>${socialCell(e.personal_website, null, true)}</td>
+                    <td>${socialCell(e.youtube_channel, 'youtube.com/channel')}</td>
+                    <td>${socialCell(e.discord_username)}</td>
+                    <td>${socialCell(e.mastodon_handle)}</td>
+                    <td>${socialCell(e.bluesky_handle, 'bsky.app/profile')}</td>
+                    <td>${socialCell(e.threads_username, 'threads.net/@')}</td>
+                    <td>${socialCell(e.instagram_username, 'instagram.com')}</td>
+                    <td>${socialCell(e.reddit_username, 'reddit.com/u')}</td>
+                    <td>${socialCell(e.hackernews_username, 'news.ycombinator.com/user?id=')}</td>
+                    <td>${socialCell(e.stackoverflow_url, null, true)}</td>
+                    <td>${socialCell(e.telegram_username, 't.me')}</td>
+                    <td>${e.last_enriched_at ? formatRelativeTime(e.last_enriched_at) : '<span class="social-missing">-</span>'}</td>
+                </tr>
+                `;
+            }).join('');
+
+            updateBulkActionsUI();
+        }
+
+        function socialCell(value, baseUrl = null, isFullUrl = false, isEmail = false) {
+            if (!value) return '<span class="social-missing">-</span>';
+
+            if (isEmail) {
+                return `<a href="mailto:${value}" title="${value}">${truncate(value, 20)}</a>`;
+            }
+
+            if (isFullUrl) {
+                return `<a href="${value}" target="_blank" title="${value}">${truncate(value, 20)}</a>`;
+            }
+
+            if (baseUrl) {
+                const url = baseUrl.startsWith('http') ? `${baseUrl}/${value}` : `https://${baseUrl}/${value}`;
+                return `<a href="${url}" target="_blank" title="${value}">${truncate(value, 15)}</a>`;
+            }
+
+            return `<span class="social-found" title="${value}">${truncate(value, 15)}</span>`;
+        }
+
+        function truncate(str, len) {
+            return str.length > len ? str.substring(0, len) + '...' : str;
+        }
+
+        function formatRelativeTime(dateStr) {
+            const date = new Date(dateStr);
+            const now = new Date();
+            const diff = now - date;
+            if (diff < 60000) return 'just now';
+            if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+            if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+            return `${Math.floor(diff / 86400000)}d ago`;
+        }
+
+        function filterEnrichmentStatus(status, btn) {
+            enrichmentFilter = status;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            loadEnrichedUsers();
+        }
+
+        function filterEnrichmentTable() {
+            renderEnrichmentTable();
+        }
+
+        function toggleUserSelection(username) {
+            if (selectedUsers.has(username)) {
+                selectedUsers.delete(username);
+            } else {
+                selectedUsers.add(username);
+            }
+            updateBulkActionsUI();
+        }
+
+        function toggleSelectAll() {
+            const checkbox = document.getElementById('headerCheckbox');
+            if (checkbox.checked) {
+                enrichmentData.forEach(u => selectedUsers.add(u.username));
+            } else {
+                selectedUsers.clear();
+            }
+            renderEnrichmentTable();
+        }
+
+        function updateBulkActionsUI() {
+            const bulkActions = document.getElementById('bulkActions');
+            const count = selectedUsers.size;
+            document.getElementById('selectedCount').textContent = count;
+            bulkActions.style.display = count > 0 ? 'flex' : 'none';
+        }
+
+        async function enrichSingleUser() {
+            const username = document.getElementById('enrichUsername').value.trim();
+            if (!username) {
+                showNotification('Please enter a username', 'error');
+                return;
+            }
+
+            showNotification(`Enriching ${username}...`, 'info');
+
+            try {
+                const response = await fetch(`/dashboard/pipeline/enrich-user/${username}`, {
+                    method: 'POST',
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    showNotification(`Enrichment queued for ${username} (Task: ${data.task_id})`, 'success');
+                    document.getElementById('enrichUsername').value = '';
+                    setTimeout(() => {
+                        refreshEnrichmentStats();
+                        loadEnrichedUsers();
+                    }, 3000);
+                } else {
+                    const err = await response.json();
+                    showNotification(err.detail || `Failed to enrich ${username}`, 'error');
+                }
+            } catch (err) {
+                showNotification(`Failed to enrich ${username}`, 'error');
+            }
+        }
+
+        async function enrichBatch() {
+            const limit = parseInt(document.getElementById('enrichBatchLimit').value) || 10;
+            const minScore = parseFloat(document.getElementById('enrichMinScore').value) || 0;
+
+            showNotification(`Starting batch enrichment for ${limit} users...`, 'info');
+
+            try {
+                const response = await fetch(`/dashboard/pipeline/enrich-batch?limit=${limit}&min_score=${minScore}`, {
+                    method: 'POST',
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    showNotification(`Batch enrichment queued: ${data.queued || limit} users (Task: ${data.task_id})`, 'success');
+                    setTimeout(() => {
+                        refreshEnrichmentStats();
+                        loadEnrichedUsers();
+                    }, 5000);
+                } else {
+                    const err = await response.json();
+                    showNotification(err.detail || 'Failed to start batch enrichment', 'error');
+                }
+            } catch (err) {
+                showNotification('Failed to start batch enrichment', 'error');
+            }
+        }
+
+        async function enrichTopPercent(percent) {
+            const limit = Math.ceil(TOTAL_CONTRIBUTORS * (percent / 100));
+            if (!confirm(`This will enrich the top ${percent}% of contributors (~${limit.toLocaleString()} users). Continue?`)) {
+                return;
+            }
+
+            showNotification(`Starting enrichment for top ${percent}% (${limit.toLocaleString()} users)...`, 'info');
+
+            try {
+                const response = await fetch(`/dashboard/pipeline/enrich-batch?limit=${limit}`, {
+                    method: 'POST',
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    showNotification(`Enrichment queued for top ${percent}% (${data.queued || limit} users)`, 'success');
+                    setTimeout(() => {
+                        refreshEnrichmentStats();
+                        loadEnrichedUsers();
+                    }, 5000);
+                } else {
+                    const err = await response.json();
+                    showNotification(err.detail || 'Failed to start enrichment', 'error');
+                }
+            } catch (err) {
+                showNotification('Failed to start enrichment', 'error');
+            }
+        }
+
+        async function enrichSelected() {
+            if (selectedUsers.size === 0) {
+                showNotification('No users selected', 'error');
+                return;
+            }
+
+            const usernames = Array.from(selectedUsers);
+            showNotification(`Enriching ${usernames.length} selected users...`, 'info');
+
+            // Queue enrichment for each user
+            let queued = 0;
+            for (const username of usernames) {
+                try {
+                    const response = await fetch(`/dashboard/pipeline/enrich-user/${username}`, {
+                        method: 'POST',
+                    });
+                    if (response.ok) queued++;
+                } catch (err) {
+                    console.error(`Failed to enrich ${username}:`, err);
+                }
+            }
+
+            showNotification(`Queued enrichment for ${queued}/${usernames.length} users`, 'success');
+            selectedUsers.clear();
+            renderEnrichmentTable();
+            setTimeout(() => {
+                refreshEnrichmentStats();
+                loadEnrichedUsers();
+            }, 5000);
+        }
+
+        function exportEnrichmentCSV() {
+            if (enrichmentData.length === 0) {
+                showNotification('No data to export', 'error');
+                return;
+            }
+
+            const headers = [
+                'username', 'status', 'global_score', 'followers',
+                'twitter', 'linkedin', 'email', 'website', 'youtube', 'discord',
+                'mastodon', 'bluesky', 'threads', 'instagram', 'reddit',
+                'hackernews', 'stackoverflow', 'telegram', 'last_enriched'
+            ];
+
+            const rows = enrichmentData.map(user => {
+                const e = user.enrichment || {};
+                return [
+                    user.username,
+                    e.status || 'pending',
+                    user.global_score || 0,
+                    e.github_followers || user.followers || 0,
+                    e.twitter_username || '',
+                    e.linkedin_url || '',
+                    e.personal_email || '',
+                    e.personal_website || '',
+                    e.youtube_channel || '',
+                    e.discord_username || '',
+                    e.mastodon_handle || '',
+                    e.bluesky_handle || '',
+                    e.threads_username || '',
+                    e.instagram_username || '',
+                    e.reddit_username || '',
+                    e.hackernews_username || '',
+                    e.stackoverflow_url || '',
+                    e.telegram_username || '',
+                    e.last_enriched_at || ''
+                ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+            });
+
+            const csv = [headers.join(','), ...rows].join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `enrichment_export_${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+
+            showNotification(`Exported ${enrichmentData.length} users to CSV`, 'success');
         }
     </script>
 </body>

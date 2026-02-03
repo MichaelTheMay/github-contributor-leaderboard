@@ -921,3 +921,329 @@ async def get_audit_logs(
         "page": page,
         "page_size": page_size,
     }
+
+
+# ============================================================================
+# ENRICHMENT ENDPOINTS
+# ============================================================================
+
+@router.get("/enrichment/status")
+async def get_enrichment_status(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Get comprehensive enrichment statistics."""
+    from datetime import timedelta
+
+    from src.db.models.enrichment import ContributorEnrichment, EnrichmentStatus
+
+    # Count by enrichment status
+    status_counts = {}
+    for status in EnrichmentStatus:
+        result = await db.execute(
+            select(func.count(ContributorEnrichment.id))
+            .where(ContributorEnrichment.enrichment_status == status)
+        )
+        status_counts[status.value] = result.scalar() or 0
+
+    # Count total users
+    total_users_result = await db.execute(select(func.count(GitHubUser.id)))
+    total_users = total_users_result.scalar() or 0
+
+    # Count users with enrichment records
+    enriched_users_result = await db.execute(
+        select(func.count(ContributorEnrichment.id))
+    )
+    enriched_users = enriched_users_result.scalar() or 0
+
+    # Count enriched in last 24 hours
+    yesterday = datetime.utcnow() - timedelta(hours=24)
+    recent_result = await db.execute(
+        select(func.count(ContributorEnrichment.id))
+        .where(ContributorEnrichment.last_enriched_at >= yesterday)
+    )
+    enriched_last_24h = recent_result.scalar() or 0
+
+    # Count by source found (how many users have each contact type)
+    with_twitter = await db.execute(
+        select(func.count()).select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.twitter_username.isnot(None))
+    )
+    with_linkedin = await db.execute(
+        select(func.count()).select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.linkedin_url.isnot(None))
+    )
+    with_email = await db.execute(
+        select(func.count()).select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.personal_email.isnot(None))
+    )
+    with_website = await db.execute(
+        select(func.count()).select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.personal_website.isnot(None))
+    )
+    with_bluesky = await db.execute(
+        select(func.count()).select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.bluesky_handle.isnot(None))
+    )
+    with_mastodon = await db.execute(
+        select(func.count()).select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.mastodon_handle.isnot(None))
+    )
+    with_discord = await db.execute(
+        select(func.count()).select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.discord_username.isnot(None))
+    )
+    with_youtube = await db.execute(
+        select(func.count()).select_from(ContributorEnrichment)
+        .where(ContributorEnrichment.youtube_channel.isnot(None))
+    )
+
+    return {
+        "total_users": total_users,
+        "enriched_users": enriched_users,
+        "unenriched_users": total_users - enriched_users,
+        "enrichment_status": status_counts,
+        "enriched_last_24h": enriched_last_24h,
+        "sources_found": {
+            "twitter": with_twitter.scalar() or 0,
+            "linkedin": with_linkedin.scalar() or 0,
+            "email": with_email.scalar() or 0,
+            "website": with_website.scalar() or 0,
+            "bluesky": with_bluesky.scalar() or 0,
+            "mastodon": with_mastodon.scalar() or 0,
+            "discord": with_discord.scalar() or 0,
+            "youtube": with_youtube.scalar() or 0,
+        },
+        "coverage_percentage": round((enriched_users / total_users * 100) if total_users > 0 else 0, 2),
+    }
+
+
+@router.post("/pipeline/enrich-batch")
+async def trigger_batch_enrichment(
+    limit: int = Query(default=10, ge=1, le=10000),
+    min_score: float | None = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Trigger batch enrichment of top contributors.
+
+    Args:
+        limit: Maximum number of contributors to enrich (1-10000)
+        min_score: Optional minimum score threshold
+        force_refresh: If True, re-enrich even recently enriched users
+    """
+    from src.workers.tasks.enrichment_tasks import batch_enrich_top_contributors
+
+    task = batch_enrich_top_contributors.delay(
+        limit=limit,
+        min_score=min_score,
+        force_refresh=force_refresh,
+    )
+
+    await broadcaster.log(
+        "info",
+        f"Batch enrichment triggered for top {limit} contributors"
+        + (f" (min_score={min_score})" if min_score else "")
+        + (" [force refresh]" if force_refresh else "")
+    )
+
+    return {
+        "status": "queued",
+        "task_id": task.id,
+        "limit": limit,
+        "min_score": min_score,
+        "force_refresh": force_refresh,
+    }
+
+
+@router.post("/pipeline/enrich-user/{username}")
+async def trigger_user_enrichment(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Trigger enrichment for a specific user by username."""
+    from src.workers.tasks.enrichment_tasks import enrich_contributor
+
+    # Find user
+    result = await db.execute(
+        select(GitHubUser).where(GitHubUser.username == username)
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User {username} not found")
+
+    # Queue enrichment task
+    task = enrich_contributor.delay(user.id)
+
+    await broadcaster.log("info", f"Enrichment triggered for user: {username}")
+
+    return {
+        "status": "queued",
+        "task_id": task.id,
+        "username": username,
+        "user_id": user.id,
+    }
+
+
+@router.get("/enrichment/recent")
+async def get_recent_enrichments(
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Get recently enriched contributors."""
+    from src.db.models.enrichment import ContributorEnrichment
+
+    result = await db.execute(
+        select(ContributorEnrichment, GitHubUser)
+        .join(GitHubUser, ContributorEnrichment.user_id == GitHubUser.id)
+        .where(ContributorEnrichment.last_enriched_at.isnot(None))
+        .order_by(ContributorEnrichment.last_enriched_at.desc())
+        .limit(limit)
+    )
+    rows = result.all()
+
+    return [
+        {
+            "username": user.username,
+            "user_id": user.id,
+            "enrichment_status": enrichment.enrichment_status.value,
+            "last_enriched_at": enrichment.last_enriched_at.isoformat() if enrichment.last_enriched_at else None,
+            "sources_found": enrichment.enrichment_sources or {},
+            "twitter": enrichment.twitter_username,
+            "linkedin": enrichment.linkedin_url,
+            "email": enrichment.personal_email,
+            "website": enrichment.personal_website,
+        }
+        for enrichment, user in rows
+    ]
+
+
+@router.get("/enrichment/failed")
+async def get_failed_enrichments(
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Get contributors with failed enrichment."""
+    from src.db.models.enrichment import ContributorEnrichment, EnrichmentStatus
+
+    result = await db.execute(
+        select(ContributorEnrichment, GitHubUser)
+        .join(GitHubUser, ContributorEnrichment.user_id == GitHubUser.id)
+        .where(ContributorEnrichment.enrichment_status == EnrichmentStatus.FAILED)
+        .order_by(ContributorEnrichment.updated_at.desc())
+        .limit(limit)
+    )
+    rows = result.all()
+
+    return [
+        {
+            "username": user.username,
+            "user_id": user.id,
+            "last_error": enrichment.last_error,
+            "enrichment_attempts": enrichment.enrichment_attempts,
+            "updated_at": enrichment.updated_at.isoformat() if enrichment.updated_at else None,
+        }
+        for enrichment, user in rows
+    ]
+
+
+@router.get("/enrichment/users")
+async def get_enriched_users(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    status: str = Query(default="", description="Filter by status: complete, partial, pending, failed"),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get users with their enrichment data for the dashboard table.
+
+    Returns users joined with global leaderboard scores and enrichment data.
+    """
+    from src.db.models.enrichment import ContributorEnrichment, EnrichmentStatus
+
+    # Build query - get users with global scores, joined with enrichment
+    query = (
+        select(GitHubUser, GlobalLeaderboard, ContributorEnrichment)
+        .outerjoin(GlobalLeaderboard, GitHubUser.id == GlobalLeaderboard.user_id)
+        .outerjoin(ContributorEnrichment, GitHubUser.id == ContributorEnrichment.user_id)
+    )
+
+    # Filter by enrichment status if specified
+    if status:
+        try:
+            status_enum = EnrichmentStatus(status)
+            query = query.where(ContributorEnrichment.enrichment_status == status_enum)
+        except ValueError:
+            pass  # Invalid status, ignore filter
+
+    # Order by global score desc, then username
+    query = query.order_by(
+        GlobalLeaderboard.total_score.desc().nullslast(),
+        GitHubUser.username.asc(),
+    ).limit(limit).offset(offset)
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    users = []
+    for user, global_lb, enrichment in rows:
+        user_data = {
+            "id": user.id,
+            "username": user.username,
+            "avatar_url": user.avatar_url,
+            "profile_url": user.profile_url,
+            "followers": user.followers,
+            "global_score": float(global_lb.total_score) if global_lb else 0,
+            "global_rank": global_lb.global_rank if global_lb else None,
+        }
+
+        if enrichment:
+            status_val = enrichment.enrichment_status
+            if hasattr(status_val, 'value'):
+                status_val = status_val.value
+            user_data["enrichment"] = {
+                "status": status_val or "pending",
+                "last_enriched_at": enrichment.last_enriched_at.isoformat() if enrichment.last_enriched_at else None,
+                "github_followers": enrichment.github_followers,
+                "twitter_username": enrichment.twitter_username,
+                "linkedin_url": enrichment.linkedin_url,
+                "personal_email": enrichment.personal_email,
+                "personal_website": enrichment.personal_website,
+                "youtube_channel": enrichment.youtube_channel,
+                "discord_username": enrichment.discord_username,
+                "mastodon_handle": enrichment.mastodon_handle,
+                "bluesky_handle": enrichment.bluesky_handle,
+                "threads_username": enrichment.threads_username,
+                "instagram_username": enrichment.instagram_username,
+                "reddit_username": enrichment.reddit_username,
+                "hackernews_username": enrichment.hackernews_username,
+                "stackoverflow_url": enrichment.stackoverflow_url,
+                "telegram_username": enrichment.telegram_username,
+                "github_bio": enrichment.github_bio,
+                "github_company": enrichment.github_company,
+                "github_location": enrichment.github_location,
+            }
+        else:
+            user_data["enrichment"] = None
+
+        users.append(user_data)
+
+    # Get total count for pagination
+    count_query = select(func.count(GitHubUser.id))
+    if status:
+        try:
+            status_enum = EnrichmentStatus(status)
+            count_query = (
+                select(func.count(GitHubUser.id))
+                .outerjoin(ContributorEnrichment, GitHubUser.id == ContributorEnrichment.user_id)
+                .where(ContributorEnrichment.enrichment_status == status_enum)
+            )
+        except ValueError:
+            pass
+
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+
+    return {
+        "users": users,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
